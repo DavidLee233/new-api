@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 )
@@ -52,52 +53,89 @@ var defaultModelRatio = map[string]float64{
 	"gpt-4o-realtime-preview-2024-12-17":      2.5,
 	"gpt-4o-mini-realtime-preview":            0.3,
 	"gpt-4o-mini-realtime-preview-2024-12-17": 0.3,
-	"gpt-4.1":                          1.0,  // $2 / 1M tokens
-	"gpt-4.1-2025-04-14":               1.0,  // $2 / 1M tokens
-	"gpt-4.1-mini":                     0.2,  // $0.4 / 1M tokens
-	"gpt-4.1-mini-2025-04-14":          0.2,  // $0.4 / 1M tokens
-	"gpt-4.1-nano":                     0.05, // $0.1 / 1M tokens
-	"gpt-4.1-nano-2025-04-14":          0.05, // $0.1 / 1M tokens
-	"gpt-image-1":                      2.5,  // $5 / 1M tokens
-	"o1":                               7.5,  // $15 / 1M tokens
-	"o1-2024-12-17":                    7.5,  // $15 / 1M tokens
-	"o1-preview":                       7.5,  // $15 / 1M tokens
-	"o1-preview-2024-09-12":            7.5,  // $15 / 1M tokens
-	"o1-mini":                          0.55, // $1.1 / 1M tokens
-	"o1-mini-2024-09-12":               0.55, // $1.1 / 1M tokens
-	"o1-pro":                           75.0, // $150 / 1M tokens
-	"o1-pro-2025-03-19":                75.0, // $150 / 1M tokens
-	"o3-mini":                          0.55,
-	"o3-mini-2025-01-31":               0.55,
-	"o3-mini-high":                     0.55,
-	"o3-mini-2025-01-31-high":          0.55,
-	"o3-mini-low":                      0.55,
-	"o3-mini-2025-01-31-low":           0.55,
-	"o3-mini-medium":                   0.55,
-	"o3-mini-2025-01-31-medium":        0.55,
-	"o3":                               1.0,  // $2 / 1M tokens
-	"o3-2025-04-16":                    1.0,  // $2 / 1M tokens
-	"o3-pro":                           10.0, // $20 / 1M tokens
-	"o3-pro-2025-06-10":                10.0, // $20 / 1M tokens
-	"o3-deep-research":                 5.0,  // $10 / 1M tokens
-	"o3-deep-research-2025-06-26":      5.0,  // $10 / 1M tokens
-	"o4-mini":                          0.55, // $1.1 / 1M tokens
-	"o4-mini-2025-04-16":               0.55, // $1.1 / 1M tokens
-	"o4-mini-deep-research":            1.0,  // $2 / 1M tokens
-	"o4-mini-deep-research-2025-06-26": 1.0,  // $2 / 1M tokens
-	"gpt-4o-mini":                      0.075,
-	"gpt-4o-mini-2024-07-18":           0.075,
-	"gpt-4-turbo":                      5, // $0.01 / 1K tokens
-	"gpt-4-turbo-2024-04-09":           5, // $0.01 / 1K tokens
-	"gpt-4.5-preview":                  37.5,
-	"gpt-4.5-preview-2025-02-27":       37.5,
-	"gpt-5":                            0.625,
-	"gpt-5-2025-08-07":                 0.625,
-	"gpt-5-chat-latest":                0.625,
-	"gpt-5-mini":                       0.125,
-	"gpt-5-mini-2025-08-07":            0.125,
-	"gpt-5-nano":                       0.025,
-	"gpt-5-nano-2025-08-07":            0.025,
+	"gpt-4.1":                            1.0,  // $2 / 1M tokens
+	"gpt-4.1-2025-04-14":                 1.0,  // $2 / 1M tokens
+	"gpt-4.1-mini":                       0.2,  // $0.4 / 1M tokens
+	"gpt-4.1-mini-2025-04-14":            0.2,  // $0.4 / 1M tokens
+	"gpt-4.1-nano":                       0.05, // $0.1 / 1M tokens
+	"gpt-4.1-nano-2025-04-14":            0.05, // $0.1 / 1M tokens
+	"gpt-image-1":                        2.5,  // $5 / 1M tokens
+	"o1":                                 7.5,  // $15 / 1M tokens
+	"o1-2024-12-17":                      7.5,  // $15 / 1M tokens
+	"o1-preview":                         7.5,  // $15 / 1M tokens
+	"o1-preview-2024-09-12":              7.5,  // $15 / 1M tokens
+	"o1-mini":                            0.55, // $1.1 / 1M tokens
+	"o1-mini-2024-09-12":                 0.55, // $1.1 / 1M tokens
+	"o1-pro":                             75.0, // $150 / 1M tokens
+	"o1-pro-2025-03-19":                  75.0, // $150 / 1M tokens
+	"o3-mini":                            0.55,
+	"o3-mini-2025-01-31":                 0.55,
+	"o3-mini-high":                       0.55,
+	"o3-mini-2025-01-31-high":            0.55,
+	"o3-mini-low":                        0.55,
+	"o3-mini-2025-01-31-low":             0.55,
+	"o3-mini-medium":                     0.55,
+	"o3-mini-2025-01-31-medium":          0.55,
+	"o3":                                 1.0,  // $2 / 1M tokens
+	"o3-2025-04-16":                      1.0,  // $2 / 1M tokens
+	"o3-pro":                             10.0, // $20 / 1M tokens
+	"o3-pro-2025-06-10":                  10.0, // $20 / 1M tokens
+	"o3-deep-research":                   5.0,  // $10 / 1M tokens
+	"o3-deep-research-2025-06-26":        5.0,  // $10 / 1M tokens
+	"o4-mini":                            0.55, // $1.1 / 1M tokens
+	"o4-mini-2025-04-16":                 0.55, // $1.1 / 1M tokens
+	"o4-mini-deep-research":              1.0,  // $2 / 1M tokens
+	"o4-mini-deep-research-2025-06-26":   1.0,  // $2 / 1M tokens
+	"gpt-4o-mini":                        0.075,
+	"gpt-4o-mini-2024-07-18":             0.075,
+	"gpt-4-turbo":                        5, // $0.01 / 1K tokens
+	"gpt-4-turbo-2024-04-09":             5, // $0.01 / 1K tokens
+	"gpt-4.5-preview":                    37.5,
+	"gpt-4.5-preview-2025-02-27":         37.5,
+	"gpt-5":                              0.625,
+	"gpt-5-2025-08-07":                   0.625,
+	"gpt-5-chat-latest":                  0.625,
+	"gpt-5-codex":                        0.625,
+	"gpt-5-codex-mini":                   0.125,
+	"gpt-5-pro":                          10.0,
+	"gpt-5-pro-2025-10-06":               10.0,
+	"gpt-5-search-api":                   0.625,
+	"gpt-5-search-api-2025-10-14":        0.625,
+	"gpt-5-mini":                         0.125,
+	"gpt-5-mini-2025-08-07":              0.125,
+	"gpt-5-nano":                         0.025,
+	"gpt-5-nano-2025-08-07":              0.025,
+	"gpt-5.1":                            0.625,
+	"gpt-5.1-2025-11-13":                 0.625,
+	"gpt-5.1-chat-latest":                0.625,
+	"gpt-5.1-codex":                      0.625,
+	"gpt-5.1-codex-max":                  0.625,
+	"gpt-5.1-codex-mini":                 0.125,
+	"gpt-5.2":                            0.625,
+	"gpt-5.2-2025-12-11":                 0.625,
+	"gpt-5.2-chat-latest":                0.625,
+	"gpt-5.2-pro":                        10.0,
+	"gpt-5.2-pro-2025-12-11":             10.0,
+	"gpt-5.2-codex":                      0.625,
+	"gpt-5.3-chat-latest":                0.625,
+	"gpt-5.3-codex":                      0.625,
+	"gpt-5.3-codex-spark":                0.125,
+	"gpt-5.4":                            0.625,
+	"gpt-5.4-2026-03-05":                 0.625,
+	"gpt-5.4-pro":                        10.0,
+	"gpt-5.4-pro-2026-03-05":             10.0,
+	"gpt-5-openai-compact":               0.625,
+	"gpt-5-codex-openai-compact":         0.625,
+	"gpt-5-codex-mini-openai-compact":    0.125,
+	"gpt-5.1-openai-compact":             0.625,
+	"gpt-5.1-codex-openai-compact":       0.625,
+	"gpt-5.1-codex-max-openai-compact":   0.625,
+	"gpt-5.1-codex-mini-openai-compact":  0.125,
+	"gpt-5.2-openai-compact":             0.625,
+	"gpt-5.2-codex-openai-compact":       0.625,
+	"gpt-5.3-codex-openai-compact":       0.625,
+	"gpt-5.3-codex-spark-openai-compact": 0.125,
+	"gpt-5.4-openai-compact":             0.625,
 	//"gpt-3.5-turbo-0301":           0.75, //deprecated
 	"gpt-3.5-turbo":          0.25,
 	"gpt-3.5-turbo-0613":     0.75,
@@ -139,14 +177,21 @@ var defaultModelRatio = map[string]float64{
 	"claude-3-7-sonnet-20250219":                1.5,
 	"claude-3-7-sonnet-20250219-thinking":       1.5,
 	"claude-sonnet-4-20250514":                  1.5,
+	"claude-sonnet-4-20250514-thinking":         1.5,
 	"claude-sonnet-4-5-20250929":                1.5,
+	"claude-sonnet-4-5-20250929-thinking":       1.5,
+	"claude-sonnet-4-6":                         1.5,
+	"claude-sonnet-4-6-thinking":                1.5,
 	"claude-opus-4-5-20251101":                  2.5,
+	"claude-opus-4-5-20251101-thinking":         2.5,
 	"claude-opus-4-6":                           2.5,
+	"claude-opus-4-6-thinking":                  2.5,
 	"claude-opus-4-6-max":                       2.5,
 	"claude-opus-4-6-high":                      2.5,
 	"claude-opus-4-6-medium":                    2.5,
 	"claude-opus-4-6-low":                       2.5,
 	"claude-opus-4-7":                           2.5,
+	"claude-opus-4-7-thinking":                  2.5,
 	"claude-opus-4-7-max":                       2.5,
 	"claude-opus-4-7-xhigh":                     2.5,
 	"claude-opus-4-7-high":                      2.5,
@@ -154,7 +199,9 @@ var defaultModelRatio = map[string]float64{
 	"claude-opus-4-7-low":                       2.5,
 	"claude-3-opus-20240229":                    7.5, // $15 / 1M tokens
 	"claude-opus-4-20250514":                    7.5,
+	"claude-opus-4-20250514-thinking":           7.5,
 	"claude-opus-4-1-20250805":                  7.5,
+	"claude-opus-4-1-20250805-thinking":         7.5,
 	"ERNIE-4.0-8K":                              0.120 * RMB,
 	"ERNIE-3.5-8K":                              0.012 * RMB,
 	"ERNIE-3.5-8K-0205":                         0.024 * RMB,
@@ -360,7 +407,7 @@ func ModelPrice2JSONString() string {
 }
 
 func UpdateModelPriceByJSONString(jsonStr string) error {
-	return types.LoadFromJsonStringWithCallback(modelPriceMap, jsonStr, InvalidateExposedDataCache)
+	return loadMapWithDefaultsAndCallback(modelPriceMap, defaultModelPrice, jsonStr, InvalidateExposedDataCache)
 }
 
 // GetModelPrice 返回模型的价格，如果模型不存在则返回-1，false
@@ -389,7 +436,7 @@ func GetModelPrice(name string, printErr bool) (float64, bool) {
 }
 
 func UpdateModelRatioByJSONString(jsonStr string) error {
-	return types.LoadFromJsonStringWithCallback(modelRatioMap, jsonStr, InvalidateExposedDataCache)
+	return loadMapWithDefaultsAndCallback(modelRatioMap, defaultModelRatio, jsonStr, InvalidateExposedDataCache)
 }
 
 // 处理带有思考预算的模型名称，方便统一定价
@@ -437,7 +484,7 @@ func CompletionRatio2JSONString() string {
 }
 
 func UpdateCompletionRatioByJSONString(jsonStr string) error {
-	return types.LoadFromJsonStringWithCallback(completionRatioMap, jsonStr, InvalidateExposedDataCache)
+	return loadMapWithDefaultsAndCallback(completionRatioMap, defaultCompletionRatio, jsonStr, InvalidateExposedDataCache)
 }
 
 func GetCompletionRatio(name string) float64 {
@@ -683,7 +730,7 @@ func AudioRatio2JSONString() string {
 }
 
 func UpdateAudioRatioByJSONString(jsonStr string) error {
-	return types.LoadFromJsonStringWithCallback(audioRatioMap, jsonStr, InvalidateExposedDataCache)
+	return loadMapWithDefaultsAndCallback(audioRatioMap, defaultAudioRatio, jsonStr, InvalidateExposedDataCache)
 }
 
 func AudioCompletionRatio2JSONString() string {
@@ -691,7 +738,7 @@ func AudioCompletionRatio2JSONString() string {
 }
 
 func UpdateAudioCompletionRatioByJSONString(jsonStr string) error {
-	return types.LoadFromJsonStringWithCallback(audioCompletionRatioMap, jsonStr, InvalidateExposedDataCache)
+	return loadMapWithDefaultsAndCallback(audioCompletionRatioMap, defaultAudioCompletionRatio, jsonStr, InvalidateExposedDataCache)
 }
 
 func GetModelRatioCopy() map[string]float64 {
@@ -708,6 +755,7 @@ func GetCompletionRatioCopy() map[string]float64 {
 
 // 转换模型名，减少渠道必须配置各种带参数模型
 func FormatMatchingModelName(name string) string {
+	name = constant.CanonicalClaudeModelAlias(name)
 
 	if strings.HasPrefix(name, "gemini-2.5-flash-lite") {
 		name = handleThinkingBudgetModel(name, "gemini-2.5-flash-lite", "gemini-2.5-flash-lite-thinking-*")
@@ -724,6 +772,32 @@ func FormatMatchingModelName(name string) string {
 		name = "gpt-4o-gizmo-*"
 	}
 	return name
+}
+
+func FormatMatchingModelNameCandidates(name string) []string {
+	candidates := constant.ClaudeModelAliasCandidates(name)
+	if len(candidates) == 0 {
+		candidates = []string{name}
+	}
+
+	appendCandidate := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == candidate {
+				return
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+
+	appendCandidate(FormatMatchingModelName(name))
+	for _, candidate := range append([]string(nil), candidates...) {
+		appendCandidate(FormatMatchingModelName(candidate))
+	}
+	return candidates
 }
 
 // result: 倍率or价格， usePrice， exist

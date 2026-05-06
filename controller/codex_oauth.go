@@ -21,7 +21,27 @@ import (
 )
 
 type codexOAuthCompleteRequest struct {
-	Input string `json:"input"`
+	Input  string `json:"input"`
+	Append bool   `json:"append,omitempty"`
+}
+
+type codexOAuthImportRequest struct {
+	Input  string `json:"input"`
+	Append bool   `json:"append,omitempty"`
+}
+
+type codexOAuthImportEnvelope struct {
+	Type     string                      `json:"type"`
+	Accounts []codexOAuthImportAccount   `json:"accounts"`
+}
+
+type codexOAuthImportAccount struct {
+	Credentials codexOAuthImportKey `json:"credentials"`
+}
+
+type codexOAuthImportKey struct {
+	codex.OAuthKey
+	ChatGPTAccountID string `json:"chatgpt_account_id,omitempty"`
 }
 
 func codexOAuthSessionKey(channelID int, field string) string {
@@ -123,6 +143,49 @@ func CompleteCodexOAuthForChannel(c *gin.Context) {
 	completeCodexOAuthWithChannelID(c, channelID)
 }
 
+func ImportCodexOAuthForChannel(c *gin.Context) {
+	channelID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("invalid channel id: %w", err))
+		return
+	}
+
+	req := codexOAuthImportRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	appendMode := req.Append || c.Query("append") == "1" || strings.EqualFold(c.Query("append"), "true")
+	keys, err := parseCodexOAuthImportInput(req.Input)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+
+	if err := importCodexOAuthKeysToChannel(channelID, keys, appendMode); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	model.InitChannelCache()
+	service.ResetProxyClientCache()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": func() string {
+			if appendMode {
+				return "appended"
+			}
+			return "saved"
+		}(),
+		"data": gin.H{
+			"channel_id": channelID,
+			"count":      len(keys),
+			"append":     appendMode,
+		},
+	})
+}
+
 func completeCodexOAuthWithChannelID(c *gin.Context, channelID int) {
 	req := codexOAuthCompleteRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -213,7 +276,13 @@ func completeCodexOAuthWithChannelID(c *gin.Context, channelID int) {
 	_ = session.Save()
 
 	if channelID > 0 {
-		if err := model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("key", string(encoded)).Error; err != nil {
+		appendMode := req.Append || c.Query("append") == "1" || strings.EqualFold(c.Query("append"), "true")
+		if appendMode {
+			if err := appendCodexOAuthKeyToChannel(channelID, key); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		} else if err := model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("key", string(encoded)).Error; err != nil {
 			common.ApiError(c, err)
 			return
 		}
@@ -221,13 +290,19 @@ func completeCodexOAuthWithChannelID(c *gin.Context, channelID int) {
 		service.ResetProxyClientCache()
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"message": "saved",
+			"message": func() string {
+				if appendMode {
+					return "appended"
+				}
+				return "saved"
+			}(),
 			"data": gin.H{
 				"channel_id":   channelID,
 				"account_id":   accountID,
 				"email":        email,
 				"expires_at":   key.Expired,
 				"last_refresh": key.LastRefresh,
+				"append":       appendMode,
 			},
 		})
 		return
@@ -244,4 +319,171 @@ func completeCodexOAuthWithChannelID(c *gin.Context, channelID int) {
 			"last_refresh": key.LastRefresh,
 		},
 	})
+}
+
+func appendCodexOAuthKeyToChannel(channelID int, oauthKey codex.OAuthKey) error {
+	return importCodexOAuthKeysToChannel(channelID, []codex.OAuthKey{oauthKey}, true)
+}
+
+func parseCodexOAuthImportInput(input string) ([]codex.OAuthKey, error) {
+	raw := strings.TrimSpace(input)
+	if raw == "" {
+		return nil, errors.New("empty oauth input")
+	}
+
+	if key, err := parseSingleCodexOAuthImportKey(raw); err == nil {
+		return []codex.OAuthKey{key}, nil
+	}
+
+	var envelope codexOAuthImportEnvelope
+	if err := common.Unmarshal([]byte(raw), &envelope); err == nil {
+		if envelope.Type == "sub2api-data" || len(envelope.Accounts) > 0 {
+			keys := make([]codex.OAuthKey, 0, len(envelope.Accounts))
+			for _, account := range envelope.Accounts {
+				key, err := normalizeCodexOAuthImportKey(account.Credentials)
+				if err != nil {
+					return nil, err
+				}
+				keys = append(keys, key)
+			}
+			if len(keys) == 0 {
+				return nil, errors.New("sub2api file does not contain any oauth credentials")
+			}
+			return keys, nil
+		}
+	}
+
+	lines := strings.Split(raw, "\n")
+	if len(lines) > 1 {
+		keys := make([]codex.OAuthKey, 0, len(lines))
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			key, err := parseSingleCodexOAuthImportKey(trimmed)
+			if err != nil {
+				return nil, err
+			}
+			keys = append(keys, key)
+		}
+		if len(keys) > 0 {
+			return keys, nil
+		}
+	}
+
+	return nil, errors.New("unsupported codex oauth import format")
+}
+
+func parseSingleCodexOAuthImportKey(raw string) (codex.OAuthKey, error) {
+	var imported codexOAuthImportKey
+	if err := common.Unmarshal([]byte(raw), &imported); err != nil {
+		return codex.OAuthKey{}, err
+	}
+	return normalizeCodexOAuthImportKey(imported)
+}
+
+func normalizeCodexOAuthImportKey(imported codexOAuthImportKey) (codex.OAuthKey, error) {
+	key := imported.OAuthKey
+	key.AccessToken = strings.TrimSpace(key.AccessToken)
+	key.RefreshToken = strings.TrimSpace(key.RefreshToken)
+	key.AccountID = strings.TrimSpace(key.AccountID)
+	key.Email = strings.TrimSpace(key.Email)
+	key.Type = strings.TrimSpace(key.Type)
+	key.LastRefresh = strings.TrimSpace(key.LastRefresh)
+	key.Expired = strings.TrimSpace(key.Expired)
+
+	if key.AccessToken == "" {
+		return codex.OAuthKey{}, errors.New("oauth credential must include access_token")
+	}
+	if key.AccountID == "" {
+		key.AccountID = strings.TrimSpace(imported.ChatGPTAccountID)
+	}
+	if key.AccountID == "" {
+		if accountID, ok := service.ExtractCodexAccountIDFromJWT(key.AccessToken); ok {
+			key.AccountID = accountID
+		}
+	}
+	if key.AccountID == "" {
+		return codex.OAuthKey{}, errors.New("oauth credential must include account_id")
+	}
+	if key.Email == "" {
+		if email, ok := service.ExtractEmailFromJWT(key.AccessToken); ok {
+			key.Email = email
+		}
+	}
+	if key.Type == "" {
+		key.Type = "codex"
+	}
+	return key, nil
+}
+
+func importCodexOAuthKeysToChannel(channelID int, oauthKeys []codex.OAuthKey, appendMode bool) error {
+	ch, err := model.GetChannelById(channelID, true)
+	if err != nil {
+		return err
+	}
+	if ch == nil {
+		return errors.New("channel not found")
+	}
+	if ch.Type != constant.ChannelTypeCodex {
+		return errors.New("channel type is not Codex")
+	}
+
+	if len(oauthKeys) == 0 {
+		return errors.New("empty oauth key list")
+	}
+
+	importedByAccountID := make(map[string]string, len(oauthKeys))
+	importedOrder := make([]string, 0, len(oauthKeys))
+	for _, oauthKey := range oauthKeys {
+		normalizedKey, err := normalizeCodexOAuthImportKey(codexOAuthImportKey{OAuthKey: oauthKey})
+		if err != nil {
+			return err
+		}
+		encoded, err := common.Marshal(normalizedKey)
+		if err != nil {
+			return err
+		}
+		if _, exists := importedByAccountID[normalizedKey.AccountID]; !exists {
+			importedOrder = append(importedOrder, normalizedKey.AccountID)
+		}
+		importedByAccountID[normalizedKey.AccountID] = string(encoded)
+	}
+
+	merged := make([]string, 0, len(importedOrder)+len(ch.GetKeys()))
+	if appendMode {
+		for _, rawKey := range ch.GetKeys() {
+			trimmed := strings.TrimSpace(rawKey)
+			if trimmed == "" {
+				continue
+			}
+			existing, parseErr := codex.ParseOAuthKey(trimmed)
+			if parseErr == nil && strings.TrimSpace(existing.AccountID) != "" {
+				if replacement, ok := importedByAccountID[existing.AccountID]; ok {
+					merged = append(merged, replacement)
+					delete(importedByAccountID, existing.AccountID)
+					continue
+				}
+			}
+			merged = append(merged, trimmed)
+		}
+	}
+	for _, accountID := range importedOrder {
+		if encoded, ok := importedByAccountID[accountID]; ok {
+			merged = append(merged, encoded)
+		}
+	}
+
+	ch.Key = strings.Join(merged, "\n")
+	if len(merged) > 1 {
+		ch.ChannelInfo.IsMultiKey = true
+		if ch.ChannelInfo.MultiKeyMode == "" {
+			ch.ChannelInfo.MultiKeyMode = constant.MultiKeyModeRandom
+		}
+	} else {
+		ch.ChannelInfo.IsMultiKey = false
+	}
+	ch.ChannelInfo.MultiKeySize = len(merged)
+	return ch.Update()
 }

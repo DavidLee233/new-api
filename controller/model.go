@@ -204,14 +204,24 @@ func ListModels(c *gin.Context, modelType int) {
 
 	switch modelType {
 	case constant.ChannelTypeAnthropic:
-		useranthropicModels := make([]dto.AnthropicModel, len(userOpenAiModels))
-		for i, model := range userOpenAiModels {
-			useranthropicModels[i] = dto.AnthropicModel{
-				ID:          model.Id,
-				CreatedAt:   time.Unix(int64(model.Created), 0).UTC().Format(time.RFC3339),
-				DisplayName: model.Id,
-				Type:        "model",
+		useranthropicModels := make([]dto.AnthropicModel, 0, len(userOpenAiModels))
+		seenAnthropicModelIDs := make(map[string]struct{}, len(userOpenAiModels))
+		for _, model := range userOpenAiModels {
+			modelID := constant.CanonicalClaudeModelAlias(model.Id)
+			if _, ok := seenAnthropicModelIDs[modelID]; ok {
+				continue
 			}
+			seenAnthropicModelIDs[modelID] = struct{}{}
+			useranthropicModels = append(useranthropicModels, buildAnthropicModel(modelID, model.Created))
+		}
+		if len(useranthropicModels) == 0 {
+			c.JSON(200, gin.H{
+				"data":     useranthropicModels,
+				"first_id": "",
+				"has_more": false,
+				"last_id":  "",
+			})
+			return
 		}
 		c.JSON(200, gin.H{
 			"data":     useranthropicModels,
@@ -263,15 +273,14 @@ func EnabledListModels(c *gin.Context) {
 
 func RetrieveModel(c *gin.Context, modelType int) {
 	modelId := c.Param("model")
-	if aiModel, ok := openAIModelsMap[modelId]; ok {
+	lookupModelId := modelId
+	if modelType == constant.ChannelTypeAnthropic {
+		lookupModelId = constant.CanonicalClaudeModelAlias(modelId)
+	}
+	if aiModel, ok := openAIModelsMap[lookupModelId]; ok {
 		switch modelType {
 		case constant.ChannelTypeAnthropic:
-			c.JSON(200, dto.AnthropicModel{
-				ID:          aiModel.Id,
-				CreatedAt:   time.Unix(int64(aiModel.Created), 0).UTC().Format(time.RFC3339),
-				DisplayName: aiModel.Id,
-				Type:        "model",
-			})
+			c.JSON(200, buildAnthropicModel(lookupModelId, aiModel.Created))
 		default:
 			c.JSON(200, aiModel)
 		}
@@ -285,5 +294,15 @@ func RetrieveModel(c *gin.Context, modelType int) {
 		c.JSON(200, gin.H{
 			"error": openAIError,
 		})
+	}
+}
+
+func buildAnthropicModel(modelID string, created int) dto.AnthropicModel {
+	canonicalModelID := constant.CanonicalClaudeModelAlias(modelID)
+	return dto.AnthropicModel{
+		ID:          canonicalModelID,
+		CreatedAt:   time.Unix(int64(created), 0).UTC().Format(time.RFC3339),
+		DisplayName: canonicalModelID,
+		Type:        "model",
 	}
 }

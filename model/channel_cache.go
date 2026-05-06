@@ -93,22 +93,39 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
-func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel, error) {
+func GetRandomSatisfiedChannel(group string, model string, retry int, excludedChannelIDs []int) (*Channel, error) {
+	excludedSet := make(map[int]struct{})
+	for _, id := range excludedChannelIDs {
+		if id > 0 {
+			excludedSet[id] = struct{}{}
+		}
+	}
+
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry)
+		return GetChannel(group, model, retry, excludedChannelIDs)
 	}
 
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
-	// First, try to find channels with the exact model name.
-	channels := group2model2channels[group][model]
+	var channels []int
+	for _, candidate := range ratio_setting.FormatMatchingModelNameCandidates(model) {
+		channels = group2model2channels[group][candidate]
+		if len(channels) > 0 {
+			break
+		}
+	}
 
-	// If no channels found, try to find channels with the normalized model name.
-	if len(channels) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		channels = group2model2channels[group][normalizedModel]
+	if len(excludedSet) > 0 {
+		filtered := make([]int, 0, len(channels))
+		for _, channelID := range channels {
+			if _, excluded := excludedSet[channelID]; excluded {
+				continue
+			}
+			filtered = append(filtered, channelID)
+		}
+		channels = filtered
 	}
 
 	if len(channels) == 0 {

@@ -489,6 +489,28 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		}
 	}
 
+	if channel.Type == constant.ChannelTypeAntigravity {
+		trimmedKey := strings.TrimSpace(channel.Key)
+		if isAdd || trimmedKey != "" {
+			if !strings.HasPrefix(trimmedKey, "{") {
+				return fmt.Errorf("Antigravity key must be a valid JSON object")
+			}
+			var keyMap map[string]any
+			if err := common.Unmarshal([]byte(trimmedKey), &keyMap); err != nil {
+				return fmt.Errorf("Antigravity key must be a valid JSON object")
+			}
+			if v, ok := keyMap["access_token"]; !ok || v == nil || strings.TrimSpace(fmt.Sprintf("%v", v)) == "" {
+				return fmt.Errorf("Antigravity key JSON must include access_token")
+			}
+			if v, ok := keyMap["refresh_token"]; !ok || v == nil || strings.TrimSpace(fmt.Sprintf("%v", v)) == "" {
+				return fmt.Errorf("Antigravity key JSON must include refresh_token")
+			}
+			if v, ok := keyMap["project_id"]; !ok || v == nil || strings.TrimSpace(fmt.Sprintf("%v", v)) == "" {
+				return fmt.Errorf("Antigravity key JSON must include project_id")
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -517,6 +539,38 @@ func RefreshCodexChannelCredential(c *gin.Context) {
 			"last_refresh": oauthKey.LastRefresh,
 			"account_id":   oauthKey.AccountID,
 			"email":        oauthKey.Email,
+			"channel_id":   ch.Id,
+			"channel_type": ch.Type,
+			"channel_name": ch.Name,
+		},
+	})
+}
+
+func RefreshAntigravityChannelCredential(c *gin.Context) {
+	channelId, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, fmt.Errorf("invalid channel id: %w", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+
+	oauthKey, ch, err := service.RefreshAntigravityChannelCredential(ctx, channelId, service.AntigravityCredentialRefreshOptions{ResetCaches: true})
+	if err != nil {
+		common.SysError("failed to refresh antigravity channel credential: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "刷新凭证失败，请稍后重试"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "refreshed",
+		"data": gin.H{
+			"expires_at":   oauthKey.Expired,
+			"last_refresh": oauthKey.LastRefresh,
+			"email":        oauthKey.Email,
+			"project_id":   oauthKey.ProjectID,
 			"channel_id":   ch.Id,
 			"channel_type": ch.Type,
 			"channel_name": ch.Name,

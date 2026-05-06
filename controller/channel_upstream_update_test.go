@@ -3,6 +3,7 @@ package controller
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/require"
@@ -95,6 +96,30 @@ func TestNormalizeChannelModelMapping(t *testing.T) {
 	require.Equal(t, map[string]string{
 		"alias-model": "upstream-model",
 	}, result)
+}
+
+func TestNormalizeChannelModelMapping_AntigravityDefaults(t *testing.T) {
+	channel := &model.Channel{
+		Type: constant.ChannelTypeAntigravity,
+	}
+
+	result := normalizeChannelModelMapping(channel)
+	require.Equal(t, "claude-opus-4-6-thinking", result["claude-opus-4-6"])
+	require.Equal(t, "claude-opus-4-6-thinking", result["opus-4-6"])
+	require.Equal(t, "claude-sonnet-4-6", result["claude-sonnet-4-6"])
+	require.Equal(t, "claude-sonnet-4-6", result["sonnet-4-6"])
+}
+
+func TestNormalizeChannelModelMapping_AntigravityCustomOverridesDefault(t *testing.T) {
+	modelMapping := `{"claude-opus-4-6":"custom-opus"}`
+	channel := &model.Channel{
+		Type:         constant.ChannelTypeAntigravity,
+		ModelMapping: &modelMapping,
+	}
+
+	result := normalizeChannelModelMapping(channel)
+	require.Equal(t, "custom-opus", result["claude-opus-4-6"])
+	require.Equal(t, "claude-sonnet-4-6", result["claude-sonnet-4-6"])
 }
 
 func TestCollectPendingUpstreamModelChangesFromModels_WithModelMapping(t *testing.T) {

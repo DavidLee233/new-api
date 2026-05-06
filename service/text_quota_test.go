@@ -171,6 +171,34 @@ func TestCacheWriteTokensTotal(t *testing.T) {
 	})
 }
 
+func TestCalculateTextQuotaSummaryUsesInputDetailsCacheWriteFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-4.1",
+		PriceData: types.PriceData{
+			ModelRatio:         1,
+			CompletionRatio:    1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 20,
+		InputTokensDetails: &dto.InputTokenDetails{
+			CachedCreationTokens: 30,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	require.Equal(t, 30, summary.CacheCreationTokens)
+}
+
 func TestCalculateTextQuotaSummaryHandlesLegacyClaudeDerivedOpenAIUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -202,7 +230,8 @@ func TestCalculateTextQuotaSummaryHandlesLegacyClaudeDerivedOpenAIUsage(t *testi
 
 	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
 
-	// 62 + 3544*0.1 + 586*1.25 + 95*5 = 1624.9 => 1624
+	// Cache read is billed:
+	// 62 + 3544*0.1 + 586*1.25 + 95*5 = 1623.9 => 1624
 	require.Equal(t, 1624, summary.Quota)
 }
 
@@ -238,6 +267,7 @@ func TestCalculateTextQuotaSummarySeparatesOpenRouterCacheReadFromPromptBilling(
 
 	// OpenRouter OpenAI-format display keeps prompt_tokens as total input,
 	// but billing still separates normal input from cache read tokens.
+	// Cache read is billed:
 	// quota = (2604 - 2432) + 2432*0.1 + 383 = 798.2 => 798
 	require.Equal(t, 2604, summary.PromptTokens)
 	require.Equal(t, 798, summary.Quota)
@@ -311,6 +341,7 @@ func TestCalculateTextQuotaSummaryKeepsPrePRClaudeOpenRouterBilling(t *testing.T
 
 	// Pre-PR PostClaudeConsumeQuota behavior for OpenRouter:
 	// prompt = 2604 - 2432 = 172
+	// Cache read is billed:
 	// quota = 172 + 2432*0.1 + 383 = 798.2 => 798
 	require.True(t, summary.IsClaudeUsageSemantic)
 	require.Equal(t, 172, summary.PromptTokens)

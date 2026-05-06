@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel/antigravity"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
 	"github.com/QuantumNous/new-api/service"
@@ -127,16 +128,17 @@ func applySelectedModelChanges(originModels []string, addModels []string, remove
 }
 
 func normalizeChannelModelMapping(channel *model.Channel) map[string]string {
-	if channel == nil || channel.ModelMapping == nil {
-		return nil
-	}
-	rawMapping := strings.TrimSpace(*channel.ModelMapping)
-	if rawMapping == "" || rawMapping == "{}" {
+	if channel == nil {
 		return nil
 	}
 	parsed := make(map[string]string)
-	if err := common.UnmarshalJsonStr(rawMapping, &parsed); err != nil {
-		return nil
+	if channel.ModelMapping != nil {
+		rawMapping := strings.TrimSpace(*channel.ModelMapping)
+		if rawMapping != "" && rawMapping != "{}" {
+			if err := common.UnmarshalJsonStr(rawMapping, &parsed); err != nil {
+				return nil
+			}
+		}
 	}
 	normalized := make(map[string]string, len(parsed))
 	for source, target := range parsed {
@@ -146,6 +148,14 @@ func normalizeChannelModelMapping(channel *model.Channel) map[string]string {
 			continue
 		}
 		normalized[normalizedSource] = normalizedTarget
+	}
+	if len(normalized) == 0 {
+		if channel.Type != constant.ChannelTypeAntigravity {
+			return nil
+		}
+	}
+	if channel.Type == constant.ChannelTypeAntigravity {
+		normalized = constant.MergeAntigravityModelMapping(normalized)
 	}
 	if len(normalized) == 0 {
 		return nil
@@ -263,6 +273,19 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		}
 		key = strings.TrimSpace(key)
 		models, err := gemini.FetchGeminiModels(baseURL, key, channel.GetSetting().Proxy)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeModelNames(models), nil
+	}
+
+	if channel.Type == constant.ChannelTypeAntigravity {
+		key, _, apiErr := channel.GetNextEnabledKey()
+		if apiErr != nil {
+			return nil, fmt.Errorf("鑾峰彇娓犻亾瀵嗛挜澶辫触: %w", apiErr)
+		}
+		key = strings.TrimSpace(key)
+		models, err := antigravity.FetchAntigravityModels(baseURL, key, channel.GetSetting().Proxy)
 		if err != nil {
 			return nil, err
 		}

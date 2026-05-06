@@ -25,7 +25,16 @@ func buildChannelAffinityStatsContextForTest(ruleName, usingGroup, keyFP string)
 	return ctx
 }
 
+func resetChannelAffinityUsageCacheStatsForTest(t *testing.T) {
+	t.Helper()
+	cache := getChannelAffinityUsageCacheStatsCache()
+	require.NotNil(t, cache)
+	require.NoError(t, cache.Purge())
+}
+
 func TestObserveChannelAffinityUsageCacheByRelayFormat_ClaudeMode(t *testing.T) {
+	resetChannelAffinityUsageCacheStatsForTest(t)
+
 	ruleName := fmt.Sprintf("rule_%d", time.Now().UnixNano())
 	usingGroup := "default"
 	keyFP := fmt.Sprintf("fp_%d", time.Now().UnixNano())
@@ -53,6 +62,8 @@ func TestObserveChannelAffinityUsageCacheByRelayFormat_ClaudeMode(t *testing.T) 
 }
 
 func TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode(t *testing.T) {
+	resetChannelAffinityUsageCacheStatsForTest(t)
+
 	ruleName := fmt.Sprintf("rule_%d", time.Now().UnixNano())
 	usingGroup := "default"
 	keyFP := fmt.Sprintf("fp_%d", time.Now().UnixNano())
@@ -83,6 +94,8 @@ func TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode(t *testing.T) {
 }
 
 func TestObserveChannelAffinityUsageCacheByRelayFormat_UnsupportedModeKeepsEmpty(t *testing.T) {
+	resetChannelAffinityUsageCacheStatsForTest(t)
+
 	ruleName := fmt.Sprintf("rule_%d", time.Now().UnixNano())
 	usingGroup := "default"
 	keyFP := fmt.Sprintf("fp_%d", time.Now().UnixNano())

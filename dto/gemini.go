@@ -44,9 +44,9 @@ func (r *GeminiChatRequest) UnmarshalJSON(data []byte) error {
 }
 
 type ToolConfig struct {
-	FunctionCallingConfig *FunctionCallingConfig `json:"functionCallingConfig,omitempty"`
-	RetrievalConfig       *RetrievalConfig       `json:"retrievalConfig,omitempty"`
-	IncludeServerSideToolInvocations *bool       `json:"includeServerSideToolInvocations,omitempty"`
+	FunctionCallingConfig            *FunctionCallingConfig `json:"functionCallingConfig,omitempty"`
+	RetrievalConfig                  *RetrievalConfig       `json:"retrievalConfig,omitempty"`
+	IncludeServerSideToolInvocations *bool                  `json:"includeServerSideToolInvocations,omitempty"`
 }
 
 type FunctionCallingConfig struct {
@@ -238,8 +238,9 @@ func (g *GeminiInlineData) UnmarshalJSON(data []byte) error {
 }
 
 type FunctionCall struct {
-	FunctionName string `json:"name"`
-	Arguments    any    `json:"args"`
+	FunctionName string          `json:"name"`
+	Arguments    any             `json:"args"`
+	ID           json.RawMessage `json:"id,omitempty"`
 }
 
 type GeminiFunctionResponse struct {
@@ -467,6 +468,10 @@ type GeminiUsageMetadata struct {
 	TotalTokenCount            int                         `json:"totalTokenCount"`
 	ThoughtsTokenCount         int                         `json:"thoughtsTokenCount"`
 	CachedContentTokenCount    int                         `json:"cachedContentTokenCount"`
+	CacheCreationTokenCount    int                         `json:"cacheCreationTokenCount"`
+	CachedCreationTokenCount   int                         `json:"cachedCreationTokenCount"`
+	CacheCreationInputTokens   int                         `json:"cacheCreationInputTokens"`
+	PromptCacheWriteTokenCount int                         `json:"promptCacheWriteTokenCount"`
 	PromptTokensDetails        []GeminiPromptTokensDetails `json:"promptTokensDetails"`
 	ToolUsePromptTokensDetails []GeminiPromptTokensDetails `json:"toolUsePromptTokensDetails"`
 }

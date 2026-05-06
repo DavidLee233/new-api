@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func buildChannelAffinityTemplateContextForTest(meta channelAffinityMeta) *gin.Context {
@@ -231,9 +232,11 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 		},
 	}
 
-	_, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5"}`), info)
+	out, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5"}`), info)
 	require.NoError(t, err)
 	require.True(t, info.UseRuntimeHeadersOverride)
+	require.Equal(t, "sess-123", gjson.GetBytes(out, "prompt_cache_key").String())
+	require.Equal(t, "24h", gjson.GetBytes(out, "prompt_cache_retention").String())
 
 	require.Equal(t, "legacy-static", info.RuntimeHeadersOverride["x-static"])
 	require.Equal(t, "Codex CLI", info.RuntimeHeadersOverride["originator"])
@@ -244,4 +247,161 @@ func TestChannelAffinityHitCodexTemplatePassHeadersEffective(t *testing.T) {
 	require.False(t, exists)
 	_, exists = info.RuntimeHeadersOverride["x-codex-turn-metadata"]
 	require.False(t, exists)
+}
+
+func TestGetPreferredChannelByAffinity_CodexHeaderSessionFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	var codexRule *operation_setting.ChannelAffinityRule
+	for i := range setting.Rules {
+		rule := &setting.Rules[i]
+		if strings.EqualFold(strings.TrimSpace(rule.Name), "codex cli trace") {
+			codexRule = rule
+			break
+		}
+	}
+	require.NotNil(t, codexRule)
+
+	affinityValue := fmt.Sprintf("header-codex-%d", time.Now().UnixNano())
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(*codexRule, "gpt-5", "default", affinityValue)
+
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 6001, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"gpt-5"}`))
+	ctx.Request.Header.Set("X-Session-Id", affinityValue)
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "gpt-5", "default")
+	require.True(t, found)
+	require.Equal(t, 6001, channelID)
+}
+
+func TestGetPreferredChannelByAffinity_ClaudeHeaderSessionFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	var claudeRule *operation_setting.ChannelAffinityRule
+	for i := range setting.Rules {
+		rule := &setting.Rules[i]
+		if strings.EqualFold(strings.TrimSpace(rule.Name), "claude cli trace") {
+			claudeRule = rule
+			break
+		}
+	}
+	require.NotNil(t, claudeRule)
+
+	affinityValue := fmt.Sprintf("header-claude-%d", time.Now().UnixNano())
+	cacheKeySuffix := buildChannelAffinityCacheKeySuffix(*claudeRule, "claude-3-7-sonnet", "default", affinityValue)
+
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(cacheKeySuffix, 7001, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{cacheKeySuffix})
+	})
+
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude-3-7-sonnet"}`))
+	ctx.Request.Header.Set("Session_id", affinityValue)
+
+	channelID, found := GetPreferredChannelByAffinity(ctx, "claude-3-7-sonnet", "default")
+	require.True(t, found)
+	require.Equal(t, 7001, channelID)
+}
+
+func TestClaudeTemplateSyncsSessionIDToMetadataUserID(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	var claudeRule *operation_setting.ChannelAffinityRule
+	for i := range setting.Rules {
+		rule := &setting.Rules[i]
+		if strings.EqualFold(strings.TrimSpace(rule.Name), "claude cli trace") {
+			claudeRule = rule
+			break
+		}
+	}
+	require.NotNil(t, claudeRule)
+	require.NotNil(t, claudeRule.ParamOverrideTemplate)
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{
+			"Session_id": "sess-claude-001",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ParamOverride: claudeRule.ParamOverrideTemplate,
+		},
+	}
+
+	out, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"claude-sonnet-4-6"}`), info)
+	require.NoError(t, err)
+	require.Equal(t, "sess-claude-001", gjson.GetBytes(out, "metadata.user_id").String())
+}
+
+func TestCodexTemplateSyncsXSessionIDToPromptCacheKey(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	var codexRule *operation_setting.ChannelAffinityRule
+	for i := range setting.Rules {
+		rule := &setting.Rules[i]
+		if strings.EqualFold(strings.TrimSpace(rule.Name), "codex cli trace") {
+			codexRule = rule
+			break
+		}
+	}
+	require.NotNil(t, codexRule)
+	require.NotNil(t, codexRule.ParamOverrideTemplate)
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{
+			"X-Session-Id": "sess-codex-fallback-001",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ParamOverride: codexRule.ParamOverrideTemplate,
+		},
+	}
+
+	out, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"gpt-5"}`), info)
+	require.NoError(t, err)
+	require.Equal(t, "sess-codex-fallback-001", gjson.GetBytes(out, "prompt_cache_key").String())
+}
+
+func TestClaudeTemplateSyncsXSessionIDToMetadataUserID(t *testing.T) {
+	setting := operation_setting.GetChannelAffinitySetting()
+	require.NotNil(t, setting)
+
+	var claudeRule *operation_setting.ChannelAffinityRule
+	for i := range setting.Rules {
+		rule := &setting.Rules[i]
+		if strings.EqualFold(strings.TrimSpace(rule.Name), "claude cli trace") {
+			claudeRule = rule
+			break
+		}
+	}
+	require.NotNil(t, claudeRule)
+	require.NotNil(t, claudeRule.ParamOverrideTemplate)
+
+	info := &relaycommon.RelayInfo{
+		RequestHeaders: map[string]string{
+			"X-Session-Id": "sess-claude-fallback-001",
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ParamOverride: claudeRule.ParamOverrideTemplate,
+		},
+	}
+
+	out, err := relaycommon.ApplyParamOverrideWithRelayInfo([]byte(`{"model":"claude-sonnet-4-6"}`), info)
+	require.NoError(t, err)
+	require.Equal(t, "sess-claude-fallback-001", gjson.GetBytes(out, "metadata.user_id").String())
 }

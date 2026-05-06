@@ -39,6 +39,48 @@ func parseCodexOAuthKey(raw string) (*CodexOAuthKey, error) {
 	return &key, nil
 }
 
+func parseCodexOAuthKeys(raw string) ([]*CodexOAuthKey, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, errors.New("codex channel: empty oauth key")
+	}
+	channel := &model.Channel{Key: raw}
+	rawKeys := channel.GetKeys()
+	keys := make([]*CodexOAuthKey, 0, len(rawKeys))
+	for _, item := range rawKeys {
+		key, err := parseCodexOAuthKey(strings.TrimSpace(item))
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return nil, errors.New("codex channel: empty oauth key")
+	}
+	return keys, nil
+}
+
+func marshalCodexOAuthKeys(keys []*CodexOAuthKey) (string, error) {
+	if len(keys) == 0 {
+		return "", errors.New("codex channel: empty oauth key")
+	}
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key == nil {
+			continue
+		}
+		data, err := common.Marshal(key)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, string(data))
+	}
+	if len(parts) == 0 {
+		return "", errors.New("codex channel: empty oauth key")
+	}
+	return strings.Join(parts, "\n"), nil
+}
+
 func RefreshCodexChannelCredential(ctx context.Context, channelID int, opts CodexCredentialRefreshOptions) (*CodexOAuthKey, *model.Channel, error) {
 	ch, err := model.GetChannelById(channelID, true)
 	if err != nil {
@@ -51,42 +93,47 @@ func RefreshCodexChannelCredential(ctx context.Context, channelID int, opts Code
 		return nil, nil, fmt.Errorf("channel type is not Codex")
 	}
 
-	oauthKey, err := parseCodexOAuthKey(strings.TrimSpace(ch.Key))
+	oauthKeys, err := parseCodexOAuthKeys(strings.TrimSpace(ch.Key))
 	if err != nil {
 		return nil, nil, err
 	}
-	if strings.TrimSpace(oauthKey.RefreshToken) == "" {
-		return nil, nil, fmt.Errorf("codex channel: refresh_token is required to refresh credential")
-	}
+	var refreshedFirst *CodexOAuthKey
+	for _, oauthKey := range oauthKeys {
+		if strings.TrimSpace(oauthKey.RefreshToken) == "" {
+			return nil, nil, fmt.Errorf("codex channel: refresh_token is required to refresh credential")
+		}
 
-	refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+		refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		res, err := RefreshCodexOAuthTokenWithProxy(refreshCtx, oauthKey.RefreshToken, ch.GetSetting().Proxy)
+		cancel()
+		if err != nil {
+			return nil, nil, err
+		}
 
-	res, err := RefreshCodexOAuthTokenWithProxy(refreshCtx, oauthKey.RefreshToken, ch.GetSetting().Proxy)
-	if err != nil {
-		return nil, nil, err
-	}
+		oauthKey.AccessToken = res.AccessToken
+		oauthKey.RefreshToken = res.RefreshToken
+		oauthKey.LastRefresh = time.Now().Format(time.RFC3339)
+		oauthKey.Expired = res.ExpiresAt.Format(time.RFC3339)
+		if strings.TrimSpace(oauthKey.Type) == "" {
+			oauthKey.Type = "codex"
+		}
 
-	oauthKey.AccessToken = res.AccessToken
-	oauthKey.RefreshToken = res.RefreshToken
-	oauthKey.LastRefresh = time.Now().Format(time.RFC3339)
-	oauthKey.Expired = res.ExpiresAt.Format(time.RFC3339)
-	if strings.TrimSpace(oauthKey.Type) == "" {
-		oauthKey.Type = "codex"
-	}
-
-	if strings.TrimSpace(oauthKey.AccountID) == "" {
-		if accountID, ok := ExtractCodexAccountIDFromJWT(oauthKey.AccessToken); ok {
-			oauthKey.AccountID = accountID
+		if strings.TrimSpace(oauthKey.AccountID) == "" {
+			if accountID, ok := ExtractCodexAccountIDFromJWT(oauthKey.AccessToken); ok {
+				oauthKey.AccountID = accountID
+			}
+		}
+		if strings.TrimSpace(oauthKey.Email) == "" {
+			if email, ok := ExtractEmailFromJWT(oauthKey.AccessToken); ok {
+				oauthKey.Email = email
+			}
+		}
+		if refreshedFirst == nil {
+			refreshedFirst = oauthKey
 		}
 	}
-	if strings.TrimSpace(oauthKey.Email) == "" {
-		if email, ok := ExtractEmailFromJWT(oauthKey.AccessToken); ok {
-			oauthKey.Email = email
-		}
-	}
 
-	encoded, err := common.Marshal(oauthKey)
+	encoded, err := marshalCodexOAuthKeys(oauthKeys)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,5 +147,5 @@ func RefreshCodexChannelCredential(ctx context.Context, channelID int, opts Code
 		ResetProxyClientCache()
 	}
 
-	return oauthKey, ch, nil
+	return refreshedFirst, ch, nil
 }

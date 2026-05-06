@@ -9,6 +9,8 @@ var AutomaticDisableKeywords = []string{
 	"Your credit balance is too low",
 	"This organization has been disabled.",
 	"You exceeded your current quota",
+	"You've hit your usage limit. Try again later.",
+	"hit your usage limit",
 	"Permission denied",
 	"The security token included in the request is invalid",
 	"Operation not allowed",

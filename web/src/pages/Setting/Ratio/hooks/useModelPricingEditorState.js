@@ -425,14 +425,14 @@ export const buildPreviewRows = (model, t) => {
       },
       {
         key: 'CacheRatio',
-        label: 'CacheRatio',
+        label: t('缓存读倍率'),
         value: hasValue(model.rawRatios.cacheRatio)
           ? model.rawRatios.cacheRatio
           : t('空'),
       },
       {
         key: 'CreateCacheRatio',
-        label: 'CreateCacheRatio',
+        label: t('缓存写倍率'),
         value: hasValue(model.rawRatios.createCacheRatio)
           ? model.rawRatios.createCacheRatio
           : t('空'),
@@ -485,13 +485,13 @@ export const buildPreviewRows = (model, t) => {
     },
     {
       key: 'CacheRatio',
-      label: 'CacheRatio',
+      label: t('缓存读倍率'),
       value:
         cachePrice !== null ? formatNumber(cachePrice / inputPrice) : t('空'),
     },
     {
       key: 'CreateCacheRatio',
-      label: 'CreateCacheRatio',
+      label: t('缓存写倍率'),
       value:
         createCachePrice !== null
           ? formatNumber(createCachePrice / inputPrice)

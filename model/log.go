@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -208,7 +209,6 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
-	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -216,6 +216,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			needRecordIp = true
 		}
 	}
+	otherStr := common.MapToJsonStr(params.Other)
 	log := &Log{
 		UserId:           userId,
 		Username:         username,
@@ -430,6 +431,203 @@ type Stat struct {
 	Quota int `json:"quota"`
 	Rpm   int `json:"rpm"`
 	Tpm   int `json:"tpm"`
+}
+
+type CachePanelStats struct {
+	WindowSeconds int64 `json:"window_seconds"`
+	SampleSize    int   `json:"sample_size"`
+
+	TotalRequests int64 `json:"total_requests"`
+
+	CacheReadRequests      int64 `json:"cache_read_requests"`
+	CacheWriteRequests     int64 `json:"cache_write_requests"`
+	CacheReadOnlyRequests  int64 `json:"cache_read_only_requests"`
+	CacheWriteOnlyRequests int64 `json:"cache_write_only_requests"`
+	CacheMixedRequests     int64 `json:"cache_mixed_requests"`
+	CacheNoneRequests      int64 `json:"cache_none_requests"`
+
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
+
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	Quota            int64 `json:"quota"`
+
+	CacheReadRequestRatio  float64 `json:"cache_read_request_ratio"`
+	CacheWriteRequestRatio float64 `json:"cache_write_request_ratio"`
+	CacheReadTokenRatio    float64 `json:"cache_read_token_ratio"`
+	CacheWriteTokenRatio   float64 `json:"cache_write_token_ratio"`
+
+	UpdatedAt int64 `json:"updated_at"`
+}
+
+type cachePanelLogRow struct {
+	Other            string `gorm:"column:other"`
+	PromptTokens     int    `gorm:"column:prompt_tokens"`
+	CompletionTokens int    `gorm:"column:completion_tokens"`
+	Quota            int    `gorm:"column:quota"`
+}
+
+func GetCachePanelStats(userId int, onlyUser bool, windowSeconds int64, limit int) (CachePanelStats, error) {
+	now := time.Now().Unix()
+	if windowSeconds <= 0 {
+		windowSeconds = 600
+	}
+	if limit <= 0 {
+		limit = 2000
+	}
+
+	stats := CachePanelStats{
+		WindowSeconds: windowSeconds,
+		UpdatedAt:     now,
+	}
+
+	tx := LOG_DB.Model(&Log{}).
+		Select("other, prompt_tokens, completion_tokens, quota").
+		Where("type = ?", LogTypeConsume).
+		Where("created_at >= ?", now-windowSeconds)
+	if onlyUser {
+		tx = tx.Where("user_id = ?", userId)
+	}
+
+	var rows []cachePanelLogRow
+	if err := tx.Order("id desc").Limit(limit).Find(&rows).Error; err != nil {
+		return stats, err
+	}
+
+	stats.SampleSize = len(rows)
+	for _, row := range rows {
+		stats.TotalRequests++
+		stats.PromptTokens += int64(row.PromptTokens)
+		stats.CompletionTokens += int64(row.CompletionTokens)
+		stats.Quota += int64(row.Quota)
+
+		cacheReadTokens, cacheWriteTokens := parseCacheReadWriteTokensFromOther(row.Other)
+		if cacheReadTokens > 0 {
+			stats.CacheReadRequests++
+			stats.CacheReadTokens += cacheReadTokens
+		}
+		if cacheWriteTokens > 0 {
+			stats.CacheWriteRequests++
+			stats.CacheWriteTokens += cacheWriteTokens
+		}
+
+		switch {
+		case cacheReadTokens > 0 && cacheWriteTokens > 0:
+			stats.CacheMixedRequests++
+		case cacheReadTokens > 0:
+			stats.CacheReadOnlyRequests++
+		case cacheWriteTokens > 0:
+			stats.CacheWriteOnlyRequests++
+		default:
+			stats.CacheNoneRequests++
+		}
+	}
+
+	stats.CacheReadRequestRatio = ratioFloat64(stats.CacheReadRequests, stats.TotalRequests)
+	stats.CacheWriteRequestRatio = ratioFloat64(stats.CacheWriteRequests, stats.TotalRequests)
+	stats.CacheReadTokenRatio = ratioFloat64(stats.CacheReadTokens, stats.CacheReadTokens+stats.CacheWriteTokens)
+	stats.CacheWriteTokenRatio = ratioFloat64(stats.CacheWriteTokens, stats.CacheReadTokens+stats.CacheWriteTokens)
+
+	return stats, nil
+}
+
+func ratioFloat64(numerator int64, denominator int64) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+	return float64(numerator) / float64(denominator)
+}
+
+func parseCacheReadWriteTokensFromOther(otherStr string) (int64, int64) {
+	if otherStr == "" {
+		return 0, 0
+	}
+	var other map[string]interface{}
+	if err := common.UnmarshalJsonStr(otherStr, &other); err != nil || other == nil {
+		return 0, 0
+	}
+
+	cacheReadTokens := parsePositiveInt64(other["cache_tokens"])
+	cacheWriteTokens := parsePositiveInt64(other["cache_write_tokens"])
+	if cacheWriteTokens <= 0 {
+		cacheCreationTokens := parsePositiveInt64(other["cache_creation_tokens"])
+		cacheCreationTokens5m := parsePositiveInt64(other["cache_creation_tokens_5m"])
+		cacheCreationTokens1h := parsePositiveInt64(other["cache_creation_tokens_1h"])
+		if cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0 {
+			cacheWriteTokens = cacheCreationTokens5m + cacheCreationTokens1h
+			if cacheCreationTokens > cacheWriteTokens {
+				cacheWriteTokens = cacheCreationTokens
+			}
+		} else {
+			cacheWriteTokens = cacheCreationTokens
+		}
+	}
+	return cacheReadTokens, cacheWriteTokens
+}
+
+func parsePositiveInt64(v interface{}) int64 {
+	switch value := v.(type) {
+	case int:
+		if value > 0 {
+			return int64(value)
+		}
+	case int8:
+		if value > 0 {
+			return int64(value)
+		}
+	case int16:
+		if value > 0 {
+			return int64(value)
+		}
+	case int32:
+		if value > 0 {
+			return int64(value)
+		}
+	case int64:
+		if value > 0 {
+			return value
+		}
+	case uint:
+		if value > 0 {
+			return int64(value)
+		}
+	case uint8:
+		if value > 0 {
+			return int64(value)
+		}
+	case uint16:
+		if value > 0 {
+			return int64(value)
+		}
+	case uint32:
+		if value > 0 {
+			return int64(value)
+		}
+	case uint64:
+		if value > 0 {
+			return int64(value)
+		}
+	case float32:
+		if value > 0 {
+			return int64(value)
+		}
+	case float64:
+		if value > 0 {
+			return int64(value)
+		}
+	case string:
+		if value == "" {
+			return 0
+		}
+		if i, err := strconv.ParseInt(value, 10, 64); err == nil && i > 0 {
+			return i
+		}
+		if f, err := strconv.ParseFloat(value, 64); err == nil && f > 0 {
+			return int64(f)
+		}
+	}
+	return 0
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {

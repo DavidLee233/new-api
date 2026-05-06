@@ -169,3 +169,40 @@ func DeleteHistoryLogs(c *gin.Context) {
 	})
 	return
 }
+
+func GetCachePanelStats(c *gin.Context) {
+	userId := c.GetInt("id")
+	role := c.GetInt("role")
+
+	windowSeconds, _ := strconv.ParseInt(c.Query("window_seconds"), 10, 64)
+	if windowSeconds <= 0 {
+		windowSeconds = 600
+	}
+	if windowSeconds < 60 {
+		windowSeconds = 60
+	}
+	if windowSeconds > 86400 {
+		windowSeconds = 86400
+	}
+
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	if limit <= 0 {
+		limit = 2000
+	}
+	if limit < 100 {
+		limit = 100
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+
+	scope := c.Query("scope")
+	onlyUser := role < common.RoleAdminUser || scope == "self"
+
+	stats, err := model.GetCachePanelStats(userId, onlyUser, windowSeconds, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, stats)
+}

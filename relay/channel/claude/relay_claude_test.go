@@ -380,3 +380,33 @@ func TestRequestOpenAI2ClaudeMessage_ConvertsTextFileContentToText(t *testing.T)
 	require.NotNil(t, content[0].Text)
 	require.Equal(t, "alpha\nbeta", *content[0].Text)
 }
+
+func TestRequestOpenAI2ClaudeMessage_AppliesDefaultCacheControlToTextBlocks(t *testing.T) {
+	request := dto.GeneralOpenAIRequest{
+		Model: "claude-3-5-sonnet",
+		Messages: []dto.Message{
+			{
+				Role:    "system",
+				Content: "system prompt",
+			},
+			{
+				Role:    "user",
+				Content: "hello",
+			},
+		},
+	}
+
+	claudeRequest, err := RequestOpenAI2ClaudeMessage(nil, request)
+	require.NoError(t, err)
+	require.NotNil(t, claudeRequest)
+
+	systemMessages := claudeRequest.ParseSystem()
+	require.NotEmpty(t, systemMessages)
+	require.NotEmpty(t, systemMessages[0].CacheControl)
+
+	require.NotEmpty(t, claudeRequest.Messages)
+	content, err := claudeRequest.Messages[0].ParseContent()
+	require.NoError(t, err)
+	require.NotEmpty(t, content)
+	require.NotEmpty(t, content[0].CacheControl)
+}

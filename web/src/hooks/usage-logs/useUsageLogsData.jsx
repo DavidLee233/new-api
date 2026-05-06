@@ -424,6 +424,12 @@ export const useLogsData = () => {
           value: other.cache_creation_tokens,
         });
       }
+      if (other?.cache_write_tokens > 0) {
+        expandDataLocal.push({
+          key: t('缂撳瓨鍐欏叆 Tokens'),
+          value: other.cache_write_tokens,
+        });
+      }
       if (logs[i].type === 2) {
         expandDataLocal.push({
           key: t('日志详情'),
@@ -453,6 +459,16 @@ export const useLogsData = () => {
                 other.group_ratio,
                 other?.user_group_ratio,
                 other.cache_ratio || 1.0,
+                other.cache_creation_tokens || 0,
+                other.cache_creation_ratio || 1.0,
+                other.cache_creation_tokens_5m || 0,
+                other.cache_creation_ratio_5m ||
+                  other.cache_creation_ratio ||
+                  1.0,
+                other.cache_creation_tokens_1h || 0,
+                other.cache_creation_ratio_1h ||
+                  other.cache_creation_ratio ||
+                  1.0,
                 false,
                 1.0,
                 other.web_search || false,

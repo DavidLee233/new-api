@@ -185,7 +185,8 @@ export default function ModelRatioSettings(props) {
         <Row gutter={16}>
           <Col xs={24} sm={16}>
             <Form.TextArea
-              label={t('提示缓存倍率')}
+              label={t('缓存读倍率')}
+              extraText={t('用于配置命中缓存后读取内容时的计费倍率')}
               placeholder={t('为一个 JSON 文本，键为模型名称，值为倍率')}
               field={'CacheRatio'}
               autosize={{ minRows: 6, maxRows: 12 }}
@@ -204,9 +205,9 @@ export default function ModelRatioSettings(props) {
         <Row gutter={16}>
           <Col xs={24} sm={16}>
             <Form.TextArea
-              label={t('缓存创建倍率')}
+              label={t('缓存写倍率')}
               extraText={t(
-                '默认为 5m 缓存创建倍率；1h 缓存创建倍率按固定乘法自动计算（当前为 1.6x）',
+                '用于配置写入缓存时的计费倍率；默认为 5m 缓存写倍率，1h 缓存写倍率按固定乘法自动计算（当前为 1.6x）',
               )}
               placeholder={t('为一个 JSON 文本，键为模型名称，值为倍率')}
               field={'CreateCacheRatio'}

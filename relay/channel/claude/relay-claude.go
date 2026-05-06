@@ -31,6 +31,71 @@ const (
 	WebSearchMaxUsesHigh   = 10
 )
 
+var defaultClaudeCacheControlEphemeral = json.RawMessage(`{"type":"ephemeral"}`)
+
+func ensureClaudeMediaTextCacheControl(media *dto.ClaudeMediaMessage) bool {
+	if media == nil {
+		return false
+	}
+	if media.Type != "text" || media.Text == nil || strings.TrimSpace(*media.Text) == "" {
+		return false
+	}
+	if len(media.CacheControl) > 0 {
+		return false
+	}
+	media.CacheControl = defaultClaudeCacheControlEphemeral
+	return true
+}
+
+func applyDefaultClaudeCacheControl(req *dto.ClaudeRequest) {
+	if req == nil {
+		return
+	}
+
+	if req.System != nil && !req.IsStringSystem() {
+		systemMedia := req.ParseSystem()
+		changed := false
+		for i := range systemMedia {
+			if ensureClaudeMediaTextCacheControl(&systemMedia[i]) {
+				changed = true
+			}
+		}
+		if changed {
+			req.System = systemMedia
+		}
+	}
+
+	for i := range req.Messages {
+		message := &req.Messages[i]
+		content, err := message.ParseContent()
+		if err != nil || len(content) == 0 {
+			if message.IsStringContent() {
+				text := strings.TrimSpace(message.GetStringContent())
+				if text != "" {
+					message.Content = []dto.ClaudeMediaMessage{
+						{
+							Type:         "text",
+							Text:         common.GetPointer(text),
+							CacheControl: defaultClaudeCacheControlEphemeral,
+						},
+					}
+				}
+			}
+			continue
+		}
+
+		changed := false
+		for j := range content {
+			if ensureClaudeMediaTextCacheControl(&content[j]) {
+				changed = true
+			}
+		}
+		if changed {
+			message.Content = content
+		}
+	}
+}
+
 func stopReasonClaude2OpenAI(reason string) string {
 	return reasonmap.ClaudeStopReasonToOpenAIFinishReason(reason)
 }
@@ -431,6 +496,7 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 
 	claudeRequest.Prompt = ""
 	claudeRequest.Messages = claudeMessages
+	applyDefaultClaudeCacheControl(&claudeRequest)
 	return &claudeRequest, nil
 }
 

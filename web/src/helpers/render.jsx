@@ -64,6 +64,7 @@ import {
   MessageSquare,
   Key,
   BarChart3,
+  Database,
   Image as ImageIcon,
   CheckSquare,
   CreditCard,
@@ -126,6 +127,8 @@ export function getLucideIcon(key, selected = false) {
       return <Key {...commonProps} color={iconColor} />;
     case 'log':
       return <BarChart3 {...commonProps} color={iconColor} />;
+    case 'cache_panel':
+      return <Database {...commonProps} color={iconColor} />;
     case 'midjourney':
       return <ImageIcon {...commonProps} color={iconColor} />;
     case 'task':
@@ -331,6 +334,8 @@ export function getChannelIcon(channelType) {
     case 3: // Azure OpenAI
     case 57: // Codex
       return <OpenAI size={iconSize} />;
+    case 58: // Antigravity
+      return <Gemini.Color size={iconSize} />;
     case 2: // Midjourney Proxy
     case 5: // Midjourney Proxy Plus
       return <Midjourney size={iconSize} />;
@@ -1130,6 +1135,16 @@ export function getCurrencyConfig() {
  */
 export function convertUSDToCurrency(usdAmount, digits = 2) {
   const { symbol, rate } = getCurrencyConfig();
+  const hasSplitCacheCreation =
+    cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
+  const cacheCreationRatioSummary = hasSplitCacheCreation
+    ? [
+        cacheCreationTokens5m > 0 ? `5m ${cacheCreationRatio5m}` : null,
+        cacheCreationTokens1h > 0 ? `1h ${cacheCreationRatio1h}` : null,
+      ]
+        .filter(Boolean)
+        .join(' / ')
+    : cacheCreationRatio;
   const convertedAmount = usdAmount * rate;
   return symbol + convertedAmount.toFixed(digits);
 }
@@ -2097,6 +2112,12 @@ export function renderLogContent(
   groupRatio,
   user_group_ratio,
   cacheRatio = 1.0,
+  cacheCreationTokens = 0,
+  cacheCreationRatio = 1.0,
+  cacheCreationTokens5m = 0,
+  cacheCreationRatio5m = 1.0,
+  cacheCreationTokens1h = 0,
+  cacheCreationRatio1h = 1.0,
   image = false,
   imageRatio = 1.0,
   webSearch = false,
@@ -2105,14 +2126,21 @@ export function renderLogContent(
   fileSearchCallCount = 0,
   displayMode = 'price',
 ) {
-  const {
-    ratio,
-    label: ratioLabel,
-    useUserGroupRatio: useUserGroupRatio,
-  } = getEffectiveRatio(groupRatio, user_group_ratio);
-
-  // 获取货币配置
+  const { ratio, label: ratioLabel } = getEffectiveRatio(
+    groupRatio,
+    user_group_ratio,
+  );
   const { symbol, rate } = getCurrencyConfig();
+  const hasSplitCacheCreation =
+    cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
+  const cacheCreationRatioSummary = hasSplitCacheCreation
+    ? [
+        cacheCreationTokens5m > 0 ? `5m ${cacheCreationRatio5m}` : null,
+        cacheCreationTokens1h > 0 ? `1h ${cacheCreationRatio1h}` : null,
+      ]
+        .filter(Boolean)
+        .join(' / ')
+    : cacheCreationRatio;
 
   if (isPriceDisplayMode(displayMode, modelPrice)) {
     if (modelPrice !== -1) {
@@ -2135,6 +2163,7 @@ export function renderLogContent(
         price: (modelRatio * 2.0 * completionRatio * rate).toFixed(6),
       }),
     ];
+
     appendPricePart(
       parts,
       cacheRatio !== 1.0,
@@ -2146,6 +2175,33 @@ export function renderLogContent(
     );
     appendPricePart(
       parts,
+      !hasSplitCacheCreation && cacheCreationTokens > 0,
+      '缓存写入价格 {{symbol}}{{price}} / 1M tokens',
+      {
+        symbol,
+        price: (modelRatio * 2.0 * cacheCreationRatio * rate).toFixed(6),
+      },
+    );
+    appendPricePart(
+      parts,
+      hasSplitCacheCreation && cacheCreationTokens5m > 0,
+      '5m 缓存写入价格 {{symbol}}{{price}} / 1M tokens',
+      {
+        symbol,
+        price: (modelRatio * 2.0 * cacheCreationRatio5m * rate).toFixed(6),
+      },
+    );
+    appendPricePart(
+      parts,
+      hasSplitCacheCreation && cacheCreationTokens1h > 0,
+      '1h 缓存写入价格 {{symbol}}{{price}} / 1M tokens',
+      {
+        symbol,
+        price: (modelRatio * 2.0 * cacheCreationRatio1h * rate).toFixed(6),
+      },
+    );
+    appendPricePart(
+      parts,
       image,
       '图片输入价格 {{symbol}}{{price}} / 1M tokens',
       {
@@ -2153,71 +2209,66 @@ export function renderLogContent(
         price: (modelRatio * 2.0 * imageRatio * rate).toFixed(6),
       },
     );
-    appendPricePart(
-      parts,
-      webSearch,
-      'Web 搜索调用 {{webSearchCallCount}} 次',
-      {
-        webSearchCallCount,
-      },
-    );
-    appendPricePart(
-      parts,
-      fileSearch,
-      '文件搜索调用 {{fileSearchCallCount}} 次',
-      {
-        fileSearchCallCount,
-      },
-    );
+    appendPricePart(parts, webSearch, 'Web 搜索调用 {{webSearchCallCount}} 次', {
+      webSearchCallCount,
+    });
+    appendPricePart(parts, fileSearch, '文件搜索调用 {{fileSearchCallCount}} 次', {
+      fileSearchCallCount,
+    });
     parts.push(getGroupRatioText(groupRatio, user_group_ratio));
     return joinBillingSummary(parts);
   }
 
   if (modelPrice !== -1) {
     return i18next.t('模型价格 {{symbol}}{{price}}，{{ratioType}} {{ratio}}', {
-      symbol: symbol,
+      symbol,
       price: (modelPrice * rate).toFixed(6),
       ratioType: ratioLabel,
       ratio,
     });
-  } else {
-    if (image) {
-      return i18next.t(
-        '模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，图片输入倍率 {{imageRatio}}，{{ratioType}} {{ratio}}',
-        {
-          modelRatio: modelRatio,
-          cacheRatio: cacheRatio,
-          completionRatio: completionRatio,
-          imageRatio: imageRatio,
-          ratioType: ratioLabel,
-          ratio,
-        },
-      );
-    } else if (webSearch) {
-      return i18next.t(
-        '模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}，Web 搜索调用 {{webSearchCallCount}} 次',
-        {
-          modelRatio: modelRatio,
-          cacheRatio: cacheRatio,
-          completionRatio: completionRatio,
-          ratioType: ratioLabel,
-          ratio,
-          webSearchCallCount,
-        },
-      );
-    } else {
-      return i18next.t(
-        '模型倍率 {{modelRatio}}，缓存倍率 {{cacheRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}',
-        {
-          modelRatio: modelRatio,
-          cacheRatio: cacheRatio,
-          completionRatio: completionRatio,
-          ratioType: ratioLabel,
-          ratio,
-        },
-      );
-    }
   }
+
+  if (image) {
+    return i18next.t(
+      '模型倍率 {{modelRatio}}，缓存读倍率 {{cacheRatio}}，缓存写倍率 {{cacheCreationRatio}}，输出倍率 {{completionRatio}}，图片输入倍率 {{imageRatio}}，{{ratioType}} {{ratio}}',
+      {
+        modelRatio,
+        cacheRatio,
+        cacheCreationRatio: cacheCreationRatioSummary,
+        completionRatio,
+        imageRatio,
+        ratioType: ratioLabel,
+        ratio,
+      },
+    );
+  }
+
+  if (webSearch) {
+    return i18next.t(
+      '模型倍率 {{modelRatio}}，缓存读倍率 {{cacheRatio}}，缓存写倍率 {{cacheCreationRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}，Web 搜索调用 {{webSearchCallCount}} 次',
+      {
+        modelRatio,
+        cacheRatio,
+        cacheCreationRatio: cacheCreationRatioSummary,
+        completionRatio,
+        ratioType: ratioLabel,
+        ratio,
+        webSearchCallCount,
+      },
+    );
+  }
+
+  return i18next.t(
+    '模型倍率 {{modelRatio}}，缓存读倍率 {{cacheRatio}}，缓存写倍率 {{cacheCreationRatio}}，输出倍率 {{completionRatio}}，{{ratioType}} {{ratio}}',
+    {
+      modelRatio,
+      cacheRatio,
+      cacheCreationRatio: cacheCreationRatioSummary,
+      completionRatio,
+      ratioType: ratioLabel,
+      ratio,
+    },
+  );
 }
 
 export function renderModelPriceSimple(

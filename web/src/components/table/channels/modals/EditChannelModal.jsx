@@ -61,6 +61,7 @@ import ModelSelectModal from './ModelSelectModal';
 import SingleModelSelectModal from './SingleModelSelectModal';
 import OllamaModelModal from './OllamaModelModal';
 import CodexOAuthModal from './CodexOAuthModal';
+import AntigravityOAuthModal from './AntigravityOAuthModal';
 import ParamOverrideEditorModal from './ParamOverrideEditorModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
 import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
@@ -155,6 +156,8 @@ function type2secretPrompt(type) {
       return '按照如下格式输入: AccessKey|SecretAccessKey';
     case 57:
       return '请输入 JSON 格式的 OAuth 凭据（必须包含 access_token 和 account_id）';
+    case 58:
+      return '请输入 JSON 格式的 OAuth 凭据（必须包含 access_token、refresh_token 和 project_id）';
     default:
       return '请输入渠道对应的鉴权密钥';
   }
@@ -242,6 +245,8 @@ const EditChannelModal = (props) => {
     useState('');
   const [ollamaModalVisible, setOllamaModalVisible] = useState(false);
   const formApiRef = useRef(null);
+  const codexOAuthFileInputRef = useRef(null);
+  const codexOAuthFileActionRef = useRef('replace');
   const [vertexKeys, setVertexKeys] = useState([]);
   const [vertexFileList, setVertexFileList] = useState([]);
   const vertexErroredNames = useRef(new Set()); // 避免重复报错
@@ -364,7 +369,12 @@ const EditChannelModal = (props) => {
   const [isIonetChannel, setIsIonetChannel] = useState(false);
   const [ionetMetadata, setIonetMetadata] = useState(null);
   const [codexOAuthModalVisible, setCodexOAuthModalVisible] = useState(false);
+  const [codexOAuthModalMode, setCodexOAuthModalMode] = useState('fill');
   const [codexCredentialRefreshing, setCodexCredentialRefreshing] =
+    useState(false);
+  const [antigravityOAuthModalVisible, setAntigravityOAuthModalVisible] =
+    useState(false);
+  const [antigravityCredentialRefreshing, setAntigravityCredentialRefreshing] =
     useState(false);
   const [paramOverrideEditorVisible, setParamOverrideEditorVisible] =
     useState(false);
@@ -668,7 +678,7 @@ const EditChannelModal = (props) => {
       // 重置手动输入模式状态
       setUseManualInput(false);
 
-      if (value === 57) {
+      if (value === 57 || value === 58) {
         setBatch(false);
         setMultiToSingle(false);
         setMultiKeyMode('random');
@@ -692,6 +702,130 @@ const EditChannelModal = (props) => {
       handleInputChange(fieldName, JSON.stringify(parsed, null, 2));
     } catch (error) {
       showError(`${t('JSON格式错误')}: ${error.message}`);
+    }
+  };
+
+  const normalizeCodexOAuthImportKey = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(t('OAuth 凭据必须是 JSON 对象'));
+    }
+
+    const accessToken = String(value.access_token || '').trim();
+    const accountId = String(
+      value.account_id || value.chatgpt_account_id || '',
+    ).trim();
+    if (!accessToken) {
+      throw new Error(t('OAuth 凭据必须包含 access_token'));
+    }
+    if (!accountId) {
+      throw new Error(t('OAuth 凭据必须包含 account_id'));
+    }
+
+    return {
+      ...value,
+      access_token: accessToken,
+      account_id: accountId,
+      type: String(value.type || 'codex').trim() || 'codex',
+    };
+  };
+
+  const parseCodexOAuthImportContent = (raw) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) {
+      throw new Error(t('请先提供 OAuth JSON 内容'));
+    }
+
+    const parsed = JSON.parse(trimmed);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      (parsed.type === 'sub2api-data' || Array.isArray(parsed.accounts))
+    ) {
+      const keys = (parsed.accounts || [])
+        .map((account) => normalizeCodexOAuthImportKey(account?.credentials))
+        .filter(Boolean);
+      if (keys.length === 0) {
+        throw new Error(t('sub2api 文件中未找到可用的 OAuth 凭据'));
+      }
+      return keys;
+    }
+
+    return [normalizeCodexOAuthImportKey(parsed)];
+  };
+
+  const fillCodexOAuthTextArea = (raw) => {
+    const keys = parseCodexOAuthImportContent(raw);
+    const normalized = keys
+      .map((item) => JSON.stringify(item, null, 2))
+      .join('\n');
+    if (formApiRef.current) {
+      formApiRef.current.setValue('key', normalized);
+    }
+    handleInputChange('key', normalized);
+    showSuccess(
+      keys.length > 1
+        ? t('已解析 {{count}} 个 OAuth 账号到输入框，请保存渠道', {
+            count: keys.length,
+          })
+        : t('已解析 OAuth 凭据到输入框，请保存渠道'),
+    );
+  };
+
+  const submitCodexOAuthImport = async (raw, appendMode) => {
+    if (!isEdit) {
+      throw new Error(t('请先创建渠道后再追加账号'));
+    }
+
+    const res = await API.post(
+      `/api/channel/${channelId}/codex/oauth/import`,
+      { input: raw, append: appendMode },
+      { skipErrorHandler: true },
+    );
+    if (!res?.data?.success) {
+      throw new Error(res?.data?.message || t('导入 OAuth 凭据失败'));
+    }
+    props.refresh();
+    showSuccess(
+      appendMode
+        ? t('OAuth 账号已追加到当前渠道')
+        : t('OAuth 账号已导入到当前渠道'),
+    );
+  };
+
+  const handleCodexOAuthAppendFromInput = async () => {
+    const raw = formApiRef.current?.getValue('key') || inputs.key || '';
+    if (!String(raw || '').trim()) {
+      showInfo(t('请先输入 OAuth JSON 凭据'));
+      return;
+    }
+
+    try {
+      await submitCodexOAuthImport(raw, true);
+    } catch (error) {
+      showError(error.message || t('追加 OAuth 账号失败'));
+    }
+  };
+
+  const openCodexOAuthFilePicker = (action) => {
+    codexOAuthFileActionRef.current = action;
+    codexOAuthFileInputRef.current?.click();
+  };
+
+  const handleCodexOAuthFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const raw = await file.text();
+      if (codexOAuthFileActionRef.current === 'append') {
+        await submitCodexOAuthImport(raw, true);
+      } else {
+        fillCodexOAuthTextArea(raw);
+      }
+    } catch (error) {
+      showError(error.message || t('解析 OAuth 文件失败'));
     }
   };
 
@@ -1214,6 +1348,15 @@ const EditChannelModal = (props) => {
     formatJsonField('key');
   };
 
+  const handleCodexOAuthAppended = () => {
+    showSuccess(t('Codex 账号已追加到当前渠道 key 列表'));
+  };
+
+  const handleAntigravityOAuthGenerated = (key) => {
+    handleInputChange('key', key);
+    formatJsonField('key');
+  };
+
   const handleRefreshCodexCredential = async () => {
     if (!isEdit) return;
 
@@ -1232,6 +1375,27 @@ const EditChannelModal = (props) => {
       showError(error.message || t('刷新失败'));
     } finally {
       setCodexCredentialRefreshing(false);
+    }
+  };
+
+  const handleRefreshAntigravityCredential = async () => {
+    if (!isEdit) return;
+
+    setAntigravityCredentialRefreshing(true);
+    try {
+      const res = await API.post(
+        `/api/channel/${channelId}/antigravity/refresh`,
+        {},
+        { skipErrorHandler: true },
+      );
+      if (!res?.data?.success) {
+        throw new Error(res?.data?.message || 'Failed to refresh credential');
+      }
+      showSuccess(t('凭证已刷新'));
+    } catch (error) {
+      showError(error.message || t('刷新失败'));
+    } finally {
+      setAntigravityCredentialRefreshing(false);
     }
   };
 
@@ -1528,9 +1692,16 @@ const EditChannelModal = (props) => {
     let localInputs = { ...formValues };
     localInputs.param_override = inputs.param_override;
 
-    if (localInputs.type === 57) {
+    if (localInputs.type === 57 || localInputs.type === 58) {
+      const isCodexOAuthChannel = localInputs.type === 57;
       if (batch) {
-        showInfo(t('Codex 渠道不支持批量创建'));
+        showInfo(
+          t(
+            isCodexOAuthChannel
+              ? 'Codex 渠道不支持批量创建'
+              : 'Antigravity 渠道不支持批量创建',
+          ),
+        );
         return;
       }
 
@@ -1541,34 +1712,49 @@ const EditChannelModal = (props) => {
       }
 
       if (rawKey !== '') {
-        if (!verifyJSON(rawKey)) {
-          showInfo(t('密钥必须是合法的 JSON 格式！'));
-          return;
-        }
         try {
-          const parsed = JSON.parse(rawKey);
-          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            showInfo(t('密钥必须是 JSON 对象'));
-            return;
+          if (isCodexOAuthChannel) {
+            const parsedKeys = parseCodexOAuthImportContent(rawKey);
+            if (parsedKeys.length === 0) {
+              showInfo(t('\u5bc6\u94a5 JSON \u5fc5\u987b\u5305\u542b access_token'));
+              return;
+            }
+            localInputs.key = parsedKeys
+              .map((item) => JSON.stringify(item))
+              .join('\n');
+          } else {
+            if (!verifyJSON(rawKey)) {
+              showInfo(t('\u5bc6\u94a5\u5fc5\u987b\u662f\u5408\u6cd5\u7684 JSON \u683c\u5f0f'));
+              return;
+            }
+            const parsed = JSON.parse(rawKey);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+              showInfo(t('\u5bc6\u94a5\u5fc5\u987b\u662f JSON \u5bf9\u8c61'));
+              return;
+            }
+            const accessToken = String(parsed.access_token || '').trim();
+            if (!accessToken) {
+              showInfo(t('\u5bc6\u94a5 JSON \u5fc5\u987b\u5305\u542b access_token'));
+              return;
+            }
+            const refreshToken = String(parsed.refresh_token || '').trim();
+            if (!refreshToken) {
+              showInfo(t('\u5bc6\u94a5 JSON \u5fc5\u987b\u5305\u542b refresh_token'));
+              return;
+            }
+            const projectId = String(parsed.project_id || '').trim();
+            if (!projectId) {
+              showInfo(t('\u5bc6\u94a5 JSON \u5fc5\u987b\u5305\u542b project_id'));
+              return;
+            }
+            localInputs.key = JSON.stringify(parsed);
           }
-          const accessToken = String(parsed.access_token || '').trim();
-          const accountId = String(parsed.account_id || '').trim();
-          if (!accessToken) {
-            showInfo(t('密钥 JSON 必须包含 access_token'));
-            return;
-          }
-          if (!accountId) {
-            showInfo(t('密钥 JSON 必须包含 account_id'));
-            return;
-          }
-          localInputs.key = JSON.stringify(parsed);
         } catch (error) {
-          showInfo(t('密钥必须是合法的 JSON 格式！'));
+          showInfo(t('\u5bc6\u94a5\u5fc5\u987b\u662f\u5408\u6cd5\u7684 JSON \u683c\u5f0f'));
           return;
         }
       }
     }
-
     if (localInputs.type === 41) {
       const keyType = localInputs.vertex_key_type || 'json';
       if (keyType === 'api_key') {
@@ -1960,7 +2146,10 @@ const EditChannelModal = (props) => {
     }
   };
 
-  const batchAllowed = (!isEdit || isMultiKeyChannel) && inputs.type !== 57;
+  const isCodexOAuthChannel = inputs.type === 57;
+  const isAntigravityOAuthChannel = inputs.type === 58;
+  const batchAllowed =
+    (!isEdit || isMultiKeyChannel) && ![57, 58].includes(inputs.type);
   const batchExtra = batchAllowed ? (
     <Space>
       {!isEdit && (
@@ -2610,13 +2799,24 @@ const EditChannelModal = (props) => {
                       disabled={isIonetLocked}
                     />
 
-                    {inputs.type === 57 && (
+                    {isCodexOAuthChannel && (
                       <Banner
                         type='warning'
                         closeIcon={null}
                         className='mb-4 rounded-xl'
                         description={t(
                           '免责声明：仅限个人使用，请勿分发或共享任何凭证。该渠道存在前置条件与使用门槛，请在充分了解流程与风险后使用，并遵守 OpenAI 的相关条款与政策。相关凭证与配置仅限接入 Codex CLI 使用，不适用于其他客户端、平台或渠道。',
+                        )}
+                      />
+                    )}
+
+                    {isAntigravityOAuthChannel && (
+                      <Banner
+                        type='warning'
+                        closeIcon={null}
+                        className='mb-4 rounded-xl'
+                        description={t(
+                          '免责声明：该渠道仅用于导入 Antigravity OAuth 账号凭据，请勿分发或共享任何凭证。当前版本支持 OAuth 导入、凭证刷新以及 Gemini 兼容的文本请求转发。',
                         )}
                       />
                     )}
@@ -2833,13 +3033,63 @@ const EditChannelModal = (props) => {
                                       size='small'
                                       type='primary'
                                       theme='outline'
-                                      onClick={() =>
-                                        setCodexOAuthModalVisible(true)
-                                      }
+                                      onClick={() => {
+                                        setCodexOAuthModalMode('fill');
+                                        setCodexOAuthModalVisible(true);
+                                      }}
                                       disabled={isIonetLocked}
                                     >
                                       {t('Codex 授权')}
                                     </Button>
+                                    <Button
+                                      size='small'
+                                      type='primary'
+                                      theme='outline'
+                                      onClick={() =>
+                                        openCodexOAuthFilePicker('replace')
+                                      }
+                                      disabled={isIonetLocked}
+                                    >
+                                      {t('导入 JSON 文件')}
+                                    </Button>
+                                    {isEdit && (
+                                      <Button
+                                        size='small'
+                                        type='primary'
+                                        theme='outline'
+                                        onClick={() => {
+                                          setCodexOAuthModalMode('append');
+                                          setCodexOAuthModalVisible(true);
+                                        }}
+                                        disabled={isIonetLocked}
+                                      >
+                                        {t('追加账号')}
+                                      </Button>
+                                    )}
+                                    {isEdit && (
+                                      <Button
+                                        size='small'
+                                        type='primary'
+                                        theme='outline'
+                                        onClick={handleCodexOAuthAppendFromInput}
+                                        disabled={isIonetLocked}
+                                      >
+                                        {t('追加输入内容')}
+                                      </Button>
+                                    )}
+                                    {isEdit && (
+                                      <Button
+                                        size='small'
+                                        type='primary'
+                                        theme='outline'
+                                        onClick={() =>
+                                          openCodexOAuthFilePicker('append')
+                                        }
+                                        disabled={isIonetLocked}
+                                      >
+                                        {t('追加 JSON 文件')}
+                                      </Button>
+                                    )}
                                     {isEdit && (
                                       <Button
                                         size='small'
@@ -2879,11 +3129,121 @@ const EditChannelModal = (props) => {
                               autosize
                               showClear
                             />
+                            <input
+                              ref={codexOAuthFileInputRef}
+                              type='file'
+                              accept='.json,application/json'
+                              style={{ display: 'none' }}
+                              onChange={handleCodexOAuthFileChange}
+                            />
 
                             <CodexOAuthModal
                               visible={codexOAuthModalVisible}
                               onCancel={() => setCodexOAuthModalVisible(false)}
-                              onSuccess={handleCodexOAuthGenerated}
+                              onSuccess={
+                                codexOAuthModalMode === 'append'
+                                  ? handleCodexOAuthAppended
+                                  : handleCodexOAuthGenerated
+                              }
+                              channelId={isEdit ? channelId : undefined}
+                              mode={codexOAuthModalMode}
+                            />
+                          </>
+                        ) : inputs.type === 58 ? (
+                          <>
+                            <Form.TextArea
+                              field='key'
+                              label={
+                                isEdit
+                                  ? t('编辑模式下不会显示已保存的密钥')
+                                  : t('密钥')
+                              }
+                              placeholder={t(
+                                '请输入 JSON 格式的 OAuth 凭据，例如：\n{\n  "access_token": "...",\n  "refresh_token": "...",\n  "project_id": "..."\n}',
+                              )}
+                              rules={
+                                isEdit
+                                  ? []
+                                  : [
+                                      {
+                                        required: true,
+                                        message: t('请输入密钥'),
+                                      },
+                                    ]
+                              }
+                              autoComplete='new-password'
+                              onChange={(value) =>
+                                handleInputChange('key', value)
+                              }
+                              disabled={isIonetLocked}
+                              extraText={
+                                <div className='flex flex-col gap-2'>
+                                  <Text type='tertiary' size='small'>
+                                    {t(
+                                      '仅支持 JSON 对象，必须包含 access_token、refresh_token 和 project_id',
+                                    )}
+                                  </Text>
+
+                                  <Space wrap spacing='tight'>
+                                    <Button
+                                      size='small'
+                                      type='primary'
+                                      theme='outline'
+                                      onClick={() =>
+                                        setAntigravityOAuthModalVisible(true)
+                                      }
+                                      disabled={isIonetLocked}
+                                    >
+                                      {t('Antigravity 授权')}
+                                    </Button>
+                                    {isEdit && (
+                                      <Button
+                                        size='small'
+                                        type='primary'
+                                        theme='outline'
+                                        onClick={
+                                          handleRefreshAntigravityCredential
+                                        }
+                                        loading={antigravityCredentialRefreshing}
+                                        disabled={isIonetLocked}
+                                      >
+                                        {t('刷新凭证')}
+                                      </Button>
+                                    )}
+                                    <Button
+                                      size='small'
+                                      type='primary'
+                                      theme='outline'
+                                      onClick={() => formatJsonField('key')}
+                                      disabled={isIonetLocked}
+                                    >
+                                      {t('格式化')}
+                                    </Button>
+                                    {isEdit && (
+                                      <Button
+                                        size='small'
+                                        type='primary'
+                                        theme='outline'
+                                        onClick={handleShow2FAModal}
+                                        disabled={isIonetLocked}
+                                      >
+                                        {t('查看密钥')}
+                                      </Button>
+                                    )}
+                                    {batchExtra}
+                                  </Space>
+                                </div>
+                              }
+                              autosize
+                              showClear
+                            />
+
+                            <AntigravityOAuthModal
+                              visible={antigravityOAuthModalVisible}
+                              onCancel={() =>
+                                setAntigravityOAuthModalVisible(false)
+                              }
+                              onSuccess={handleAntigravityOAuthGenerated}
                             />
                           </>
                         ) : inputs.type === 41 &&

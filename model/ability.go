@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -88,7 +89,7 @@ func getPriority(group string, model string, retry int) (int, error) {
 	return priorityToUse, nil
 }
 
-func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
+func getChannelQuery(group string, model string, retry int, excludedChannelIDs []int) (*gorm.DB, error) {
 	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
 	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery)
 	if retry != 0 {
@@ -99,15 +100,18 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 			channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priority)
 		}
 	}
+	if len(excludedChannelIDs) > 0 {
+		channelQuery = channelQuery.Where("channel_id NOT IN ?", excludedChannelIDs)
+	}
 
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int) (*Channel, error) {
+func getChannelByExactModel(group string, model string, retry int, excludedChannelIDs []int) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
+	channelQuery, err := getChannelQuery(group, model, retry, excludedChannelIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +145,16 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
+}
+
+func GetChannel(group string, model string, retry int, excludedChannelIDs []int) (*Channel, error) {
+	for _, candidate := range ratio_setting.FormatMatchingModelNameCandidates(model) {
+		channel, err := getChannelByExactModel(group, candidate, retry, excludedChannelIDs)
+		if err != nil || channel != nil {
+			return channel, err
+		}
+	}
+	return nil, nil
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

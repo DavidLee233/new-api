@@ -56,6 +56,100 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	return normalized
 }
 
+func normalizeChannelTestStream(channel *model.Channel, modelName, endpointType string, isStream bool) bool {
+	if isStream {
+		return true
+	}
+	normalizedEndpoint := normalizeChannelTestEndpoint(channel, modelName, endpointType)
+	if channel != nil &&
+		channel.Type == constant.ChannelTypeCodex &&
+		constant.EndpointType(normalizedEndpoint) == constant.EndpointTypeOpenAIResponse {
+		return true
+	}
+	return false
+}
+
+func selectChannelTestModel(channel *model.Channel) string {
+	if channel == nil {
+		return ""
+	}
+	if channel.TestModel != nil && strings.TrimSpace(*channel.TestModel) != "" {
+		return strings.TrimSpace(*channel.TestModel)
+	}
+
+	models := channel.GetModels()
+	if len(models) == 0 {
+		return ""
+	}
+	if channel.Type == constant.ChannelTypeAntigravity {
+		if preferred := pickPreferredAntigravityTestModel(models); preferred != "" {
+			return preferred
+		}
+	}
+	for _, modelName := range models {
+		modelName = strings.TrimSpace(modelName)
+		if modelName != "" {
+			return modelName
+		}
+	}
+	return ""
+}
+
+func pickPreferredAntigravityTestModel(models []string) string {
+	preferredPrefixes := []string{
+		"claude-sonnet-4-6",
+		"claude-sonnet-4-5",
+		"claude-sonnet-4-20250514",
+		"claude-3-7-sonnet",
+		"claude-3-5-sonnet",
+		"gemini-2.5-flash",
+		"gemini-2.5-flash-lite",
+		"gemini-2.5-pro-preview",
+	}
+
+	for _, prefix := range preferredPrefixes {
+		for _, modelName := range models {
+			modelName = strings.TrimSpace(modelName)
+			if modelName == "" || shouldSkipAntigravityTestModel(modelName) {
+				continue
+			}
+			if strings.HasPrefix(modelName, prefix) {
+				return modelName
+			}
+		}
+	}
+
+	for _, modelName := range models {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" || shouldSkipAntigravityTestModel(modelName) {
+			continue
+		}
+		return modelName
+	}
+	return ""
+}
+
+func shouldSkipAntigravityTestModel(modelName string) bool {
+	lowerName := strings.ToLower(strings.TrimSpace(modelName))
+	if lowerName == "" {
+		return true
+	}
+	skipKeywords := []string{
+		"image",
+		"embedding",
+		"vision",
+		"audio",
+		"tab_",
+		"chat_",
+	}
+	for _, keyword := range skipKeywords {
+		if strings.Contains(lowerName, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
 func testChannel(channel *model.Channel, testModel string, endpointType string, isStream bool) testResult {
 	tik := time.Now()
 	var unsupportedTestChannelTypes = []int{
@@ -78,20 +172,14 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 
 	testModel = strings.TrimSpace(testModel)
 	if testModel == "" {
-		if channel.TestModel != nil && *channel.TestModel != "" {
-			testModel = strings.TrimSpace(*channel.TestModel)
-		} else {
-			models := channel.GetModels()
-			if len(models) > 0 {
-				testModel = strings.TrimSpace(models[0])
-			}
-			if testModel == "" {
-				testModel = "gpt-4o-mini"
-			}
+		testModel = selectChannelTestModel(channel)
+		if testModel == "" {
+			testModel = "gpt-4o-mini"
 		}
 	}
 
 	endpointType = normalizeChannelTestEndpoint(channel, testModel, endpointType)
+	isStream = normalizeChannelTestStream(channel, testModel, endpointType, isStream)
 
 	requestPath := "/v1/chat/completions"
 
@@ -417,7 +505,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
 		if httpResp.StatusCode != http.StatusOK {
-			err := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
+			err := relay.HandleUpstreamErrorResponse(c, info, httpResp, true)
 			common.SysError(fmt.Sprintf(
 				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d err=%v",
 				channel.Id,

@@ -3,7 +3,7 @@ package operation_setting
 import "github.com/QuantumNous/new-api/setting/config"
 
 type ChannelAffinityKeySource struct {
-	Type string `json:"type"` // context_int, context_string, gjson
+	Type string `json:"type"` // context_int, context_string, gjson, header
 	Key  string `json:"key,omitempty"`
 	Path string `json:"path,omitempty"`
 }
@@ -73,6 +73,68 @@ func buildPassHeaderTemplate(headers []string) map[string]interface{} {
 	}
 }
 
+func buildCodexCacheWriteTemplate(headers []string) map[string]interface{} {
+	clonedHeaders := make([]string, 0, len(headers))
+	clonedHeaders = append(clonedHeaders, headers...)
+	sessionHeaderSources := []string{
+		"header:session_id",
+		"header:session-id",
+		"header:x-session-id",
+		"header:x-codex-session-id",
+	}
+	operations := []map[string]interface{}{
+		{
+			"mode":        "pass_headers",
+			"value":       clonedHeaders,
+			"keep_origin": true,
+		},
+	}
+	for _, source := range sessionHeaderSources {
+		operations = append(operations, map[string]interface{}{
+			"mode": "sync_fields",
+			"from": source,
+			"to":   "json:prompt_cache_key",
+		})
+	}
+	operations = append(operations, map[string]interface{}{
+		"path":        "prompt_cache_retention",
+		"mode":        "set",
+		"value":       "24h",
+		"keep_origin": true,
+	})
+	return map[string]interface{}{
+		"operations": operations,
+	}
+}
+
+func buildClaudeCacheWriteTemplate(headers []string) map[string]interface{} {
+	clonedHeaders := make([]string, 0, len(headers))
+	clonedHeaders = append(clonedHeaders, headers...)
+	sessionHeaderSources := []string{
+		"header:session_id",
+		"header:session-id",
+		"header:x-session-id",
+		"header:x-claude-session-id",
+	}
+	operations := []map[string]interface{}{
+		{
+			"mode":        "pass_headers",
+			"value":       clonedHeaders,
+			"keep_origin": true,
+		},
+	}
+	for _, source := range sessionHeaderSources {
+		operations = append(operations, map[string]interface{}{
+			"mode": "sync_fields",
+			"from": source,
+			"to":   "json:metadata.user_id",
+		})
+	}
+	return map[string]interface{}{
+		"operations": operations,
+	}
+}
+
 var channelAffinitySetting = ChannelAffinitySetting{
 	Enabled:           true,
 	SwitchOnSuccess:   true,
@@ -82,13 +144,17 @@ var channelAffinitySetting = ChannelAffinitySetting{
 		{
 			Name:       "codex cli trace",
 			ModelRegex: []string{"^gpt-.*$"},
-			PathRegex:  []string{"/v1/responses"},
+			PathRegex:  []string{"^/v1/responses(?:/compact)?$"},
 			KeySources: []ChannelAffinityKeySource{
+				{Type: "header", Key: "session_id"},
+				{Type: "header", Key: "session-id"},
+				{Type: "header", Key: "x-session-id"},
+				{Type: "header", Key: "x-codex-session-id"},
 				{Type: "gjson", Path: "prompt_cache_key"},
 			},
 			ValueRegex:            "",
 			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(codexCliPassThroughHeaders),
+			ParamOverrideTemplate: buildCodexCacheWriteTemplate(codexCliPassThroughHeaders),
 			SkipRetryOnFailure:    true,
 			IncludeUsingGroup:     true,
 			IncludeRuleName:       true,
@@ -97,13 +163,21 @@ var channelAffinitySetting = ChannelAffinitySetting{
 		{
 			Name:       "claude cli trace",
 			ModelRegex: []string{"^claude-.*$"},
-			PathRegex:  []string{"/v1/messages"},
+			PathRegex: []string{
+				"^/v1/messages$",
+				"^/v1/chat/completions$",
+				"^/v1/responses(?:/compact)?$",
+			},
 			KeySources: []ChannelAffinityKeySource{
+				{Type: "header", Key: "session_id"},
+				{Type: "header", Key: "session-id"},
+				{Type: "header", Key: "x-session-id"},
+				{Type: "header", Key: "x-claude-session-id"},
 				{Type: "gjson", Path: "metadata.user_id"},
 			},
 			ValueRegex:            "",
 			TTLSeconds:            0,
-			ParamOverrideTemplate: buildPassHeaderTemplate(claudeCliPassThroughHeaders),
+			ParamOverrideTemplate: buildClaudeCacheWriteTemplate(claudeCliPassThroughHeaders),
 			SkipRetryOnFailure:    true,
 			IncludeUsingGroup:     true,
 			IncludeRuleName:       true,

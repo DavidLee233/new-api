@@ -483,6 +483,9 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 				Name:     name,
 				Response: contentMap,
 			}
+			if strings.TrimSpace(message.ToolCallId) != "" {
+				functionResp.ID = json.RawMessage(strconv.Quote(message.ToolCallId))
+			}
 
 			*parts = append(*parts, dto.GeminiPart{
 				FunctionResponse: functionResp,
@@ -511,6 +514,9 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 						FunctionName: call.Function.Name,
 						Arguments:    args,
 					},
+				}
+				if strings.TrimSpace(call.ID) != "" {
+					toolCall.FunctionCall.ID = json.RawMessage(strconv.Quote(call.ID))
 				}
 				if shouldAttachThoughtSignature && !signatureAttached && hasFunctionCallContent(toolCall.FunctionCall) && len(toolCall.ThoughtSignature) == 0 {
 					toolCall.ThoughtSignature = json.RawMessage(strconv.Quote(thoughtSignatureBypassValue))
@@ -1001,14 +1007,29 @@ func getResponseToolCall(item *dto.GeminiPart) *dto.ToolCallResponse {
 	if err != nil {
 		return nil
 	}
+	toolCallID := geminiFunctionCallID(item.FunctionCall)
+	if toolCallID == "" {
+		toolCallID = fmt.Sprintf("call_%s", common.GetUUID())
+	}
 	return &dto.ToolCallResponse{
-		ID:   fmt.Sprintf("call_%s", common.GetUUID()),
+		ID:   toolCallID,
 		Type: "function",
 		Function: dto.FunctionResponse{
 			Arguments: string(argsBytes),
 			Name:      item.FunctionCall.FunctionName,
 		},
 	}
+}
+
+func geminiFunctionCallID(call *dto.FunctionCall) string {
+	if call == nil || len(call.ID) == 0 {
+		return ""
+	}
+	var id string
+	if err := common.Unmarshal(call.ID, &id); err == nil {
+		return strings.TrimSpace(id)
+	}
+	return strings.TrimSpace(string(call.ID))
 }
 
 func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackPromptTokens int) dto.Usage {
@@ -1024,6 +1045,7 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 	}
 	usage.CompletionTokenDetails.ReasoningTokens = metadata.ThoughtsTokenCount
 	usage.PromptTokensDetails.CachedTokens = metadata.CachedContentTokenCount
+	usage.PromptTokensDetails.CachedCreationTokens = geminiCacheCreationTokenCount(metadata)
 
 	for _, detail := range metadata.PromptTokensDetails {
 		if detail.Modality == "AUDIO" {
@@ -1048,6 +1070,41 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 		usage.PromptTokensDetails.TextTokens = usage.PromptTokens
 	}
 
+	return usage
+}
+
+func geminiCacheCreationTokenCount(metadata dto.GeminiUsageMetadata) int {
+	return maxInt(
+		metadata.CacheCreationTokenCount,
+		metadata.CachedCreationTokenCount,
+		metadata.CacheCreationInputTokens,
+		metadata.PromptCacheWriteTokenCount,
+	)
+}
+
+func maxInt(values ...int) int {
+	maxValue := 0
+	for _, value := range values {
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	return maxValue
+}
+
+func normalizeGeminiUsageForRelayFormat(usage dto.Usage, relayFormat types.RelayFormat) dto.Usage {
+	if relayFormat != types.RelayFormatClaude {
+		return usage
+	}
+
+	usage.UsageSource = "gemini"
+	usage.UsageSemantic = "anthropic"
+	nonInputPromptTokens := usage.PromptTokensDetails.CachedTokens + usage.PromptTokensDetails.CachedCreationTokens
+	if nonInputPromptTokens > 0 {
+		usage.PromptTokens = maxInt(usage.PromptTokens-nonInputPromptTokens, 0)
+		usage.InputTokens = usage.PromptTokens + nonInputPromptTokens
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
 	return usage
 }
 
@@ -1291,6 +1348,7 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		// 更新使用量统计
 		if geminiResponse.UsageMetadata.TotalTokenCount != 0 {
 			mappedUsage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
+			mappedUsage = normalizeGeminiUsageForRelayFormat(mappedUsage, info.RelayFormat)
 			*usage = mappedUsage
 		}
 
@@ -1357,7 +1415,7 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 			// send first response
 			emptyResponse := helper.GenerateStartEmptyResponse(id, createAt, info.UpstreamModelName, nil)
 			if response.IsToolCall() {
-				if len(emptyResponse.Choices) > 0 && len(response.Choices) > 0 {
+				if info.RelayFormat != types.RelayFormatClaude && len(emptyResponse.Choices) > 0 && len(response.Choices) > 0 {
 					toolCalls := response.Choices[0].Delta.ToolCalls
 					copiedToolCalls := make([]dto.ToolCallResponse, len(toolCalls))
 					for idx := range toolCalls {
@@ -1372,9 +1430,11 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 					logger.LogError(c, err.Error())
 				}
 
-				response.ClearToolCalls()
-				if response.IsFinished() {
-					response.Choices[0].FinishReason = nil
+				if info.RelayFormat != types.RelayFormatClaude {
+					response.ClearToolCalls()
+					if response.IsFinished() {
+						response.Choices[0].FinishReason = nil
+					}
 				}
 			} else {
 				err := handleStream(c, info, emptyResponse)
@@ -1422,6 +1482,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	}
 	if len(geminiResponse.Candidates) == 0 {
 		usage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
+		usage = normalizeGeminiUsageForRelayFormat(usage, info.RelayFormat)
 
 		var newAPIError *types.NewAPIError
 		if geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
@@ -1458,6 +1519,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	fullTextResponse := responseGeminiChat2OpenAI(c, &geminiResponse)
 	fullTextResponse.Model = info.UpstreamModelName
 	usage := buildUsageFromGeminiMetadata(geminiResponse.UsageMetadata, info.GetEstimatePromptTokens())
+	usage = normalizeGeminiUsageForRelayFormat(usage, info.RelayFormat)
 
 	fullTextResponse.Usage = usage
 

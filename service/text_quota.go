@@ -53,6 +53,35 @@ type textQuotaSummary struct {
 	ImageGenerationCallPrice float64
 }
 
+func usageCacheReadTokens(usage *dto.Usage) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.PromptTokensDetails.CachedTokens > 0 {
+		return usage.PromptTokensDetails.CachedTokens
+	}
+	if usage.InputTokensDetails != nil && usage.InputTokensDetails.CachedTokens > 0 {
+		return usage.InputTokensDetails.CachedTokens
+	}
+	if usage.PromptCacheHitTokens > 0 {
+		return usage.PromptCacheHitTokens
+	}
+	return 0
+}
+
+func usageCacheWriteTokens(usage *dto.Usage) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.PromptTokensDetails.CachedCreationTokens > 0 {
+		return usage.PromptTokensDetails.CachedCreationTokens
+	}
+	if usage.InputTokensDetails != nil && usage.InputTokensDetails.CachedCreationTokens > 0 {
+		return usage.InputTokensDetails.CachedCreationTokens
+	}
+	return 0
+}
+
 func cacheWriteTokensTotal(summary textQuotaSummary) int {
 	if summary.CacheCreationTokens5m > 0 || summary.CacheCreationTokens1h > 0 {
 		splitCacheWriteTokens := summary.CacheCreationTokens5m + summary.CacheCreationTokens1h
@@ -79,10 +108,10 @@ func isLegacyClaudeDerivedOpenAIUsage(relayInfo *relaycommon.RelayInfo, usage *d
 
 func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) textQuotaSummary {
 	summary := textQuotaSummary{
-		ModelName:            relayInfo.OriginModelName,
-		TokenName:            ctx.GetString("token_name"),
-		UseTimeSeconds:       time.Now().Unix() - relayInfo.StartTime.Unix(),
-		CompletionRatio:      relayInfo.PriceData.CompletionRatio,
+		ModelName:       relayInfo.OriginModelName,
+		TokenName:       ctx.GetString("token_name"),
+		UseTimeSeconds:  time.Now().Unix() - relayInfo.StartTime.Unix(),
+		CompletionRatio: relayInfo.PriceData.CompletionRatio,
 		CacheRatio:           relayInfo.PriceData.CacheRatio,
 		ImageRatio:           relayInfo.PriceData.ImageRatio,
 		ModelRatio:           relayInfo.PriceData.ModelRatio,
@@ -106,8 +135,8 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	summary.PromptTokens = usage.PromptTokens
 	summary.CompletionTokens = usage.CompletionTokens
 	summary.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	summary.CacheTokens = usage.PromptTokensDetails.CachedTokens
-	summary.CacheCreationTokens = usage.PromptTokensDetails.CachedCreationTokens
+	summary.CacheTokens = usageCacheReadTokens(usage)
+	summary.CacheCreationTokens = usageCacheWriteTokens(usage)
 	summary.CacheCreationTokens5m = usage.ClaudeCacheCreation5mTokens
 	summary.CacheCreationTokens1h = usage.ClaudeCacheCreation1hTokens
 	summary.ImageTokens = usage.PromptTokensDetails.ImageTokens
@@ -136,7 +165,6 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	dCompletionTokens := decimal.NewFromInt(int64(summary.CompletionTokens))
 	dCachedCreationTokens := decimal.NewFromInt(int64(summary.CacheCreationTokens))
 	dCompletionRatio := decimal.NewFromFloat(summary.CompletionRatio)
-	dCacheRatio := decimal.NewFromFloat(summary.CacheRatio)
 	dImageRatio := decimal.NewFromFloat(summary.ImageRatio)
 	dModelRatio := decimal.NewFromFloat(summary.ModelRatio)
 	dGroupRatio := decimal.NewFromFloat(summary.GroupRatio)
@@ -203,7 +231,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			if !summary.IsClaudeUsageSemantic && !legacyClaudeDerived {
 				baseTokens = baseTokens.Sub(dCacheTokens)
 			}
-			cachedTokensWithRatio = dCacheTokens.Mul(dCacheRatio)
+			cachedTokensWithRatio = dCacheTokens.Mul(decimal.NewFromFloat(summary.CacheRatio))
 		}
 
 		var cachedCreationTokensWithRatio decimal.Decimal
@@ -404,6 +432,15 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		// If split 5m/1h values are present, this is their sum; otherwise it falls back
 		// to cache_creation_tokens.
 		other["cache_write_tokens"] = cacheWriteTokens
+	}
+	if cacheWriteTokens > 0 && summary.CacheTokens > 0 {
+		other["cache_stage"] = "mixed"
+	} else if cacheWriteTokens > 0 {
+		other["cache_stage"] = "write"
+	} else if summary.CacheTokens > 0 {
+		other["cache_stage"] = "read"
+	} else {
+		other["cache_stage"] = "none"
 	}
 	if relayInfo.GetFinalRequestRelayFormat() != types.RelayFormatClaude && usage != nil && usage.UsageSource != "" && usage.InputTokens > 0 {
 		// input_tokens_total: explicit normalized total input used by the usage log UI.

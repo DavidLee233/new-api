@@ -17,16 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal,
   Button,
+  Collapse,
+  Descriptions,
+  Modal,
   Progress,
-  Typography,
   Spin,
   Tag,
-  Descriptions,
-  Collapse,
+  Typography,
 } from '@douyinfe/semi-ui';
 import { API, showError } from '../../../../helpers';
 
@@ -108,16 +108,15 @@ const resolveRateLimitWindows = (data) => {
 };
 
 const formatDurationSeconds = (seconds, t) => {
-  const tt = typeof t === 'function' ? t : (v) => v;
   const s = Number(seconds);
   if (!Number.isFinite(s) || s <= 0) return '-';
   const total = Math.floor(s);
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const secs = total % 60;
-  if (hours > 0) return `${hours}${tt('小时')} ${minutes}${tt('分钟')}`;
-  if (minutes > 0) return `${minutes}${tt('分钟')} ${secs}${tt('秒')}`;
-  return `${secs}${tt('秒')}`;
+  if (hours > 0) return `${hours}${t('小时')} ${minutes}${t('分钟')}`;
+  if (minutes > 0) return `${minutes}${t('分钟')} ${secs}${t('秒')}`;
+  return `${secs}${t('秒')}`;
 };
 
 const formatUnixSeconds = (unixSeconds) => {
@@ -136,7 +135,6 @@ const getDisplayText = (value) => {
 };
 
 const formatAccountTypeLabel = (value, t) => {
-  const tt = typeof t === 'function' ? t : (v) => v;
   const normalized = normalizePlanType(value);
   switch (normalized) {
     case 'free':
@@ -150,7 +148,7 @@ const formatAccountTypeLabel = (value, t) => {
     case 'enterprise':
       return 'Enterprise';
     default:
-      return getDisplayText(value) || tt('未识别');
+      return getDisplayText(value) || t('未识别');
   }
 };
 
@@ -172,19 +170,37 @@ const getAccountTypeTagColor = (value) => {
   }
 };
 
-const resolveUsageStatusTag = (t, rateLimit) => {
-  const tt = typeof t === 'function' ? t : (v) => v;
+const resolveUsageStatusTag = (t, rateLimit, accountSuccess) => {
+  if (!accountSuccess) {
+    return <Tag color='red'>{t('失败')}</Tag>;
+  }
   if (!rateLimit || Object.keys(rateLimit).length === 0) {
-    return <Tag color='grey'>{tt('待确认')}</Tag>;
+    return <Tag color='grey'>{t('待确认')}</Tag>;
   }
   if (rateLimit?.allowed && !rateLimit?.limit_reached) {
-    return <Tag color='green'>{tt('可用')}</Tag>;
+    return <Tag color='green'>{t('可用')}</Tag>;
   }
-  return <Tag color='red'>{tt('受限')}</Tag>;
+  return <Tag color='red'>{t('受限')}</Tag>;
+};
+
+const normalizeAccounts = (payload) => {
+  const accounts = Array.isArray(payload?.accounts) ? payload.accounts : [];
+  if (accounts.length > 0) return accounts;
+  if (!payload) return [];
+  return [
+    {
+      index: 0,
+      account_id: payload?.data?.account_id,
+      email: payload?.data?.email,
+      success: payload?.success !== false,
+      message: payload?.message,
+      upstream_status: payload?.upstream_status,
+      data: payload?.data,
+    },
+  ];
 };
 
 const AccountInfoValue = ({ t, value, onCopy, monospace = false }) => {
-  const tt = typeof t === 'function' ? t : (v) => v;
   const text = getDisplayText(value);
   const hasValue = text !== '';
 
@@ -205,30 +221,26 @@ const AccountInfoValue = ({ t, value, onCopy, monospace = false }) => {
         disabled={!hasValue}
         onClick={() => onCopy?.(text)}
       >
-        {tt('复制')}
+        {t('复制')}
       </Button>
     </div>
   );
 };
 
 const RateLimitWindowCard = ({ t, title, windowData }) => {
-  const tt = typeof t === 'function' ? t : (v) => v;
   const hasWindowData =
     !!windowData &&
     typeof windowData === 'object' &&
     Object.keys(windowData).length > 0;
   const percent = clampPercent(windowData?.used_percent ?? 0);
-  const resetAt = windowData?.reset_at;
-  const resetAfterSeconds = windowData?.reset_after_seconds;
-  const limitWindowSeconds = windowData?.limit_window_seconds;
 
   return (
     <div className='rounded-lg border border-semi-color-border bg-semi-color-bg-0 p-3'>
       <div className='flex items-center justify-between gap-2'>
         <div className='font-medium'>{title}</div>
         <Text type='tertiary' size='small'>
-          {tt('重置时间：')}
-          {formatUnixSeconds(resetAt)}
+          {t('重置时间：')}
+          {formatUnixSeconds(windowData?.reset_at)}
         </Text>
       </div>
 
@@ -246,141 +258,162 @@ const RateLimitWindowCard = ({ t, title, windowData }) => {
 
       <div className='mt-1 flex flex-wrap items-center gap-2 text-xs text-semi-color-text-2'>
         <div>
-          {tt('已使用：')}
+          {t('已使用：')}
           {hasWindowData ? `${percent}%` : '-'}
         </div>
         <div>
-          {tt('距离重置：')}
-          {hasWindowData ? formatDurationSeconds(resetAfterSeconds, tt) : '-'}
+          {t('距离重置：')}
+          {hasWindowData ? formatDurationSeconds(windowData?.reset_after_seconds, t) : '-'}
         </div>
         <div>
-          {tt('窗口：')}
-          {hasWindowData ? formatDurationSeconds(limitWindowSeconds, tt) : '-'}
+          {t('窗口：')}
+          {hasWindowData ? formatDurationSeconds(windowData?.limit_window_seconds, t) : '-'}
         </div>
       </div>
     </div>
   );
 };
 
-const CodexUsageView = ({ t, record, payload, onCopy, onRefresh }) => {
-  const tt = typeof t === 'function' ? t : (v) => v;
-  const [showRawJson, setShowRawJson] = useState(false);
-  const data = payload?.data ?? null;
-  const rateLimit = data?.rate_limit ?? {};
-  const { fiveHourWindow, weeklyWindow } = resolveRateLimitWindows(data);
-  const upstreamStatus = payload?.upstream_status;
-  const accountType = data?.plan_type ?? rateLimit?.plan_type;
-  const accountTypeLabel = formatAccountTypeLabel(accountType, tt);
-  const accountTypeTagColor = getAccountTypeTagColor(accountType);
-  const statusTag = resolveUsageStatusTag(tt, rateLimit);
-  const userId = data?.user_id;
-  const email = data?.email;
-  const accountId = data?.account_id;
-  const errorMessage =
-    payload?.success === false ? getDisplayText(payload?.message) || tt('获取用量失败') : '';
-
-  const rawText =
-    typeof data === 'string' ? data : JSON.stringify(data ?? payload, null, 2);
+const SummaryCard = ({ t, payload, record, onRefresh }) => {
+  const summary = payload?.summary ?? {};
+  const totalAccounts = Number(summary?.total_accounts ?? 0);
+  const successAccounts = Number(summary?.success_accounts ?? 0);
+  const failedAccounts = Number(summary?.failed_accounts ?? 0);
+  const isMultiAccount = !!summary?.is_multi_account;
 
   return (
-    <div className='flex flex-col gap-4'>
-      {errorMessage && (
-        <div className='rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'>
+    <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-0 p-4'>
+      <div className='flex flex-wrap items-start justify-between gap-3'>
+        <div>
+          <div className='text-xs font-medium text-semi-color-text-2'>
+            {t('Codex 账号与用量')}
+          </div>
+          <div className='mt-2 flex flex-wrap items-center gap-2'>
+            <Tag color='blue' type='light' shape='circle'>
+              {t('渠道：')}
+              {record?.name || '-'}
+            </Tag>
+            <Tag color='grey' type='light' shape='circle'>
+              {t('编号：')}
+              {record?.id || '-'}
+            </Tag>
+            <Tag color={isMultiAccount ? 'violet' : 'cyan'} type='light' shape='circle'>
+              {isMultiAccount ? t('多账号渠道') : t('单账号渠道')}
+            </Tag>
+          </div>
+        </div>
+        <Button size='small' type='tertiary' theme='outline' onClick={onRefresh}>
+          {t('刷新')}
+        </Button>
+      </div>
+
+      <div className='mt-3 grid grid-cols-1 gap-3 md:grid-cols-3'>
+        <div className='rounded-lg bg-semi-color-fill-0 px-3 py-3'>
+          <div className='text-xs text-semi-color-text-2'>{t('账号总数')}</div>
+          <div className='mt-1 text-lg font-semibold'>{totalAccounts}</div>
+        </div>
+        <div className='rounded-lg bg-semi-color-fill-0 px-3 py-3'>
+          <div className='text-xs text-semi-color-text-2'>{t('成功获取')}</div>
+          <div className='mt-1 text-lg font-semibold text-green-600'>{successAccounts}</div>
+        </div>
+        <div className='rounded-lg bg-semi-color-fill-0 px-3 py-3'>
+          <div className='text-xs text-semi-color-text-2'>{t('获取失败')}</div>
+          <div className='mt-1 text-lg font-semibold text-red-600'>{failedAccounts}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AccountUsageCard = ({ t, account, onCopy }) => {
+  const [showRawJson, setShowRawJson] = useState(false);
+  const data = account?.data ?? null;
+  const rateLimit = data?.rate_limit ?? {};
+  const { fiveHourWindow, weeklyWindow } = resolveRateLimitWindows(data);
+  const accountType = data?.plan_type ?? rateLimit?.plan_type;
+  const accountTypeLabel = formatAccountTypeLabel(accountType, t);
+  const accountTypeTagColor = getAccountTypeTagColor(accountType);
+  const statusTag = resolveUsageStatusTag(t, rateLimit, account?.success);
+  const userId = data?.user_id;
+  const email = data?.email ?? account?.email;
+  const accountId = data?.account_id ?? account?.account_id;
+  const errorMessage = !account?.success ? getDisplayText(account?.message) || t('获取用量失败') : '';
+  const rawText =
+    typeof data === 'string'
+      ? data
+      : JSON.stringify(data ?? account ?? {}, null, 2);
+
+  return (
+    <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-0 p-4'>
+      <div className='flex flex-wrap items-start justify-between gap-2'>
+        <div className='min-w-0'>
+          <div className='text-xs font-medium text-semi-color-text-2'>
+            {t('账号')}
+            {' #'}
+            {Number(account?.index ?? 0) + 1}
+          </div>
+          <div className='mt-2 flex flex-wrap items-center gap-2'>
+            <Tag
+              color={accountTypeTagColor}
+              type='light'
+              shape='circle'
+              size='large'
+              className='font-semibold'
+            >
+              {accountTypeLabel}
+            </Tag>
+            {statusTag}
+            <Tag color='grey' type='light' shape='circle'>
+              {t('上游状态码：')}
+              {account?.upstream_status ?? '-'}
+            </Tag>
+          </div>
+        </div>
+      </div>
+
+      {errorMessage ? (
+        <div className='mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'>
           {errorMessage}
         </div>
-      )}
+      ) : null}
 
-      <div className='rounded-xl border border-semi-color-border bg-semi-color-bg-0 p-3'>
-        <div className='flex flex-wrap items-start justify-between gap-2'>
-          <div className='min-w-0'>
-            <div className='text-xs font-medium text-semi-color-text-2'>
-              {tt('Codex 帐号')}
-            </div>
-            <div className='mt-2 flex flex-wrap items-center gap-2'>
-              <Tag
-                color={accountTypeTagColor}
-                type='light'
-                shape='circle'
-                size='large'
-                className='font-semibold'
-              >
-                {accountTypeLabel}
-              </Tag>
-              {statusTag}
-              <Tag color='grey' type='light' shape='circle'>
-                {tt('上游状态码：')}
-                {upstreamStatus ?? '-'}
-              </Tag>
-            </div>
-          </div>
-          <Button size='small' type='tertiary' theme='outline' onClick={onRefresh}>
-            {tt('刷新')}
-          </Button>
-        </div>
-
-        <div className='mt-2 rounded-lg bg-semi-color-fill-0 px-3 py-2'>
-          <Descriptions>
-            <Descriptions.Item itemKey='User ID'>
-              <AccountInfoValue
-                t={tt}
-                value={userId}
-                onCopy={onCopy}
-                monospace={true}
-              />
-            </Descriptions.Item>
-            <Descriptions.Item itemKey={tt('邮箱')}>
-              <AccountInfoValue t={tt} value={email} onCopy={onCopy} />
-            </Descriptions.Item>
-            <Descriptions.Item itemKey='Account ID'>
-              <AccountInfoValue
-                t={tt}
-                value={accountId}
-                onCopy={onCopy}
-                monospace={true}
-              />
-            </Descriptions.Item>
-          </Descriptions>
-        </div>
-
-        <div className='mt-2 text-xs text-semi-color-text-2'>
-          {tt('渠道：')}
-          {record?.name || '-'} ({tt('编号：')}
-          {record?.id || '-'})
-        </div>
+      <div className='mt-3 rounded-lg bg-semi-color-fill-0 px-3 py-2'>
+        <Descriptions>
+          <Descriptions.Item itemKey='User ID'>
+            <AccountInfoValue t={t} value={userId} onCopy={onCopy} monospace={true} />
+          </Descriptions.Item>
+          <Descriptions.Item itemKey={t('邮箱')}>
+            <AccountInfoValue t={t} value={email} onCopy={onCopy} />
+          </Descriptions.Item>
+          <Descriptions.Item itemKey='Account ID'>
+            <AccountInfoValue t={t} value={accountId} onCopy={onCopy} monospace={true} />
+          </Descriptions.Item>
+        </Descriptions>
       </div>
 
-      <div>
-        <div className='mb-2'>
-          <div className='text-sm font-semibold text-semi-color-text-0'>
-            {tt('额度窗口')}
-          </div>
-          <Text type='tertiary' size='small'>
-            {tt('用于观察当前帐号在 Codex 上游的限额使用情况')}
-          </Text>
+      <div className='mt-4'>
+        <div className='mb-2 text-sm font-semibold text-semi-color-text-0'>
+          {t('额度窗口')}
         </div>
+        <Text type='tertiary' size='small'>
+          {t('用于观察当前账号在 Codex 上游的限额使用情况')}
+        </Text>
       </div>
 
-      <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
-        <RateLimitWindowCard
-          t={tt}
-          title={tt('5小时窗口')}
-          windowData={fiveHourWindow}
-        />
-        <RateLimitWindowCard
-          t={tt}
-          title={tt('每周窗口')}
-          windowData={weeklyWindow}
-        />
+      <div className='mt-3 grid grid-cols-1 gap-3 md:grid-cols-2'>
+        <RateLimitWindowCard t={t} title={t('5小时窗口')} windowData={fiveHourWindow} />
+        <RateLimitWindowCard t={t} title={t('每周窗口')} windowData={weeklyWindow} />
       </div>
 
       <Collapse
+        className='mt-4'
         activeKey={showRawJson ? ['raw-json'] : []}
         onChange={(activeKey) => {
           const keys = Array.isArray(activeKey) ? activeKey : [activeKey];
           setShowRawJson(keys.includes('raw-json'));
         }}
       >
-        <Collapse.Panel header={tt('原始 JSON')} itemKey='raw-json'>
+        <Collapse.Panel header={t('原始 JSON')} itemKey='raw-json'>
           <div className='mb-2 flex justify-end'>
             <Button
               size='small'
@@ -389,10 +422,10 @@ const CodexUsageView = ({ t, record, payload, onCopy, onRefresh }) => {
               onClick={() => onCopy?.(rawText)}
               disabled={!rawText}
             >
-              {tt('复制')}
+              {t('复制')}
             </Button>
           </div>
-          <pre className='max-h-[50vh] overflow-y-auto rounded-lg bg-semi-color-fill-0 p-3 text-xs text-semi-color-text-0'>
+          <pre className='max-h-[40vh] overflow-y-auto rounded-lg bg-semi-color-fill-0 p-3 text-xs text-semi-color-text-0'>
             {rawText}
           </pre>
         </Collapse.Panel>
@@ -401,8 +434,38 @@ const CodexUsageView = ({ t, record, payload, onCopy, onRefresh }) => {
   );
 };
 
+const CodexUsageView = ({ t, record, payload, onCopy, onRefresh }) => {
+  const accounts = useMemo(() => normalizeAccounts(payload), [payload]);
+  const allFailed = accounts.length > 0 && accounts.every((account) => !account?.success);
+  const topMessage =
+    getDisplayText(payload?.message) ||
+    (allFailed ? t('获取用量失败') : '');
+
+  return (
+    <div className='flex max-h-[75vh] flex-col gap-4 overflow-y-auto pr-1'>
+      <SummaryCard t={t} payload={payload} record={record} onRefresh={onRefresh} />
+
+      {topMessage ? (
+        <div className='rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700'>
+          {topMessage}
+        </div>
+      ) : null}
+
+      <div className='flex flex-col gap-4'>
+        {accounts.map((account, index) => (
+          <AccountUsageCard
+            key={`${account?.account_id || 'account'}-${index}`}
+            t={t}
+            account={account}
+            onCopy={onCopy}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const CodexUsageLoader = ({ t, record, initialPayload, onCopy }) => {
-  const tt = typeof t === 'function' ? t : (v) => v;
   const [loading, setLoading] = useState(!initialPayload);
   const [payload, setPayload] = useState(initialPayload ?? null);
   const hasShownErrorRef = useRef(false);
@@ -421,22 +484,26 @@ const CodexUsageLoader = ({ t, record, initialPayload, onCopy }) => {
         skipErrorHandler: true,
       });
       if (!mountedRef.current) return;
-      setPayload(res?.data ?? null);
-      if (!res?.data?.success && !hasShownErrorRef.current) {
+      const nextPayload = res?.data ?? null;
+      setPayload(nextPayload);
+
+      const accounts = normalizeAccounts(nextPayload);
+      const hasAnySuccess = accounts.some((account) => account?.success);
+      if (!hasAnySuccess && !hasShownErrorRef.current) {
         hasShownErrorRef.current = true;
-        showError(tt('获取用量失败'));
+        showError(t('获取用量失败'));
       }
     } catch (error) {
       if (!mountedRef.current) return;
       if (!hasShownErrorRef.current) {
         hasShownErrorRef.current = true;
-        showError(tt('获取用量失败'));
+        showError(t('获取用量失败'));
       }
-      setPayload({ success: false, message: String(error) });
+      setPayload({ success: false, message: String(error), accounts: [] });
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [recordId, tt]);
+  }, [recordId, t]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -453,7 +520,7 @@ const CodexUsageLoader = ({ t, record, initialPayload, onCopy }) => {
   if (loading) {
     return (
       <div className='flex items-center justify-center py-10'>
-        <Spin spinning={true} size='large' tip={tt('加载中...')} />
+        <Spin spinning={true} size='large' tip={t('加载中...')} />
       </div>
     );
   }
@@ -461,15 +528,10 @@ const CodexUsageLoader = ({ t, record, initialPayload, onCopy }) => {
   if (!payload) {
     return (
       <div className='flex flex-col gap-3'>
-        <Text type='danger'>{tt('获取用量失败')}</Text>
+        <Text type='danger'>{t('获取用量失败')}</Text>
         <div className='flex justify-end'>
-          <Button
-            size='small'
-            type='primary'
-            theme='outline'
-            onClick={fetchUsage}
-          >
-            {tt('刷新')}
+          <Button size='small' type='primary' theme='outline' onClick={fetchUsage}>
+            {t('刷新')}
           </Button>
         </div>
       </div>
@@ -478,7 +540,7 @@ const CodexUsageLoader = ({ t, record, initialPayload, onCopy }) => {
 
   return (
     <CodexUsageView
-      t={tt}
+      t={t}
       record={record}
       payload={payload}
       onCopy={onCopy}
@@ -488,16 +550,14 @@ const CodexUsageLoader = ({ t, record, initialPayload, onCopy }) => {
 };
 
 export const openCodexUsageModal = ({ t, record, payload, onCopy }) => {
-  const tt = typeof t === 'function' ? t : (v) => v;
-
   Modal.info({
-    title: tt('Codex 帐号与用量'),
+    title: t('Codex 账号与用量'),
     centered: true,
-    width: 900,
-    style: { maxWidth: '95vw' },
+    width: 980,
+    style: { maxWidth: '96vw' },
     content: (
       <CodexUsageLoader
-        t={tt}
+        t={t}
         record={record}
         initialPayload={payload}
         onCopy={onCopy}
@@ -506,7 +566,7 @@ export const openCodexUsageModal = ({ t, record, payload, onCopy }) => {
     footer: (
       <div className='flex justify-end gap-2'>
         <Button type='primary' theme='solid' onClick={() => Modal.destroyAll()}>
-          {tt('关闭')}
+          {t('关闭')}
         </Button>
       </div>
     ),

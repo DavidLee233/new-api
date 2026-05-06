@@ -7,6 +7,8 @@ $dataDir = Join-Path $root 'data'
 $pidFile = Join-Path $stateDir 'local-dev-pids.json'
 $stopScript = Join-Path $root 'stop-local-dev.ps1'
 $backendBuildLog = Join-Path $logDir 'backend-build.log'
+$goCacheDir = Join-Path $stateDir 'gocache'
+$goTmpDir = Join-Path $stateDir 'gotmp'
 
 function Quote-Argument {
   param([string]$Value)
@@ -40,7 +42,7 @@ function Start-DetachedProcess {
   return $process
 }
 
-foreach ($dir in @($stateDir, $logDir, $dataDir)) {
+foreach ($dir in @($stateDir, $logDir, $dataDir, $goCacheDir, $goTmpDir)) {
   if (-not (Test-Path $dir)) {
     New-Item -ItemType Directory -Path $dir | Out-Null
   }
@@ -53,8 +55,13 @@ if (Test-Path $pidFile) {
 $goCommand = (Get-Command go -ErrorAction Stop).Source
 $nodeCommand = (Get-Command node -ErrorAction Stop).Source
 $backendBinary = Join-Path $stateDir 'new-api-dev.exe'
+$env:GOCACHE = $goCacheDir
+$env:GOTMPDIR = $goTmpDir
 
-& $goCommand build -o $backendBinary . *> $backendBuildLog
+$quotedGoCommand = '"' + ($goCommand -replace '"', '\"') + '"'
+$quotedBackendBinary = '"' + ($backendBinary -replace '"', '\"') + '"'
+$quotedBackendBuildLog = '"' + ($backendBuildLog -replace '"', '\"') + '"'
+cmd.exe /c "$quotedGoCommand build -o $quotedBackendBinary . > $quotedBackendBuildLog 2>&1"
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $backendBinary)) {
   Write-Host 'Backend build failed. Recent log:' -ForegroundColor Red
   if (Test-Path $backendBuildLog) {

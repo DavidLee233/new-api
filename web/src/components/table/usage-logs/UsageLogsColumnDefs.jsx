@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright (C) 2025 QuantumNous
 
 This program is free software: you can redistribute it and/or modify
@@ -65,6 +65,35 @@ function formatRatio(ratio) {
   return String(ratio);
 }
 
+function formatFormulaNumber(value, digits = 4) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return '0';
+  }
+  return parsed
+    .toFixed(digits)
+    .replace(/\.?0+$/, '');
+}
+
+function getQuotaPerUnitValue() {
+  try {
+    const raw = localStorage.getItem('quota_per_unit');
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  } catch (error) {}
+  return 500000;
+}
+
+function buildQuotaFormulaLine(label, formula, amount) {
+  return {
+    label,
+    formula,
+    amount,
+  };
+}
+
 function buildChannelAffinityTooltip(affinity, t) {
   if (!affinity) {
     return null;
@@ -77,11 +106,11 @@ function buildChannelAffinityTooltip(affinity, t) {
   const keyText = `${keySource}:${keyPath}${keyFp}`;
 
   const lines = [
-    t('渠道亲和性'),
-    `${t('规则')}：${affinity.rule_name || '-'}`,
-    `${t('分组')}：${affinity.selected_group || '-'}`,
-    `${t('Key')}：${keyText}`,
-    ...(keyHint ? [`${t('Key 摘要')}：${keyHint}`] : []),
+    t('\u6e20\u9053\u4eb2\u548c'),
+    `${t('\u89c4\u5219')}: ${affinity.rule_name || '-'}` ,
+    `${t('\u5206\u7ec4')}: ${affinity.selected_group || '-'}` ,
+    `${t('Key')}: ${keyText}` ,
+    ...(keyHint ? [`${t('Key \u6458\u8981')}: ${keyHint}`] : []),
   ];
 
   return (
@@ -99,43 +128,43 @@ function renderType(type, t) {
     case 1:
       return (
         <Tag color='cyan' shape='circle'>
-          {t('充值')}
+          {t('\u5145\u503c')}
         </Tag>
       );
     case 2:
       return (
         <Tag color='lime' shape='circle'>
-          {t('消费')}
+          {t('\u6d88\u8d39')}
         </Tag>
       );
     case 3:
       return (
         <Tag color='orange' shape='circle'>
-          {t('管理')}
+          {t('\u7ba1\u7406')}
         </Tag>
       );
     case 4:
       return (
         <Tag color='purple' shape='circle'>
-          {t('系统')}
+          {t('\u7cfb\u7edf')}
         </Tag>
       );
     case 5:
       return (
         <Tag color='red' shape='circle'>
-          {t('错误')}
+          {t('\u9519\u8bef')}
         </Tag>
       );
     case 6:
       return (
         <Tag color='teal' shape='circle'>
-          {t('退款')}
+          {t('\u9000\u8d39')}
         </Tag>
       );
     default:
       return (
         <Tag color='grey' shape='circle'>
-          {t('未知')}
+          {t('\u672a\u77e5')}
         </Tag>
       );
   }
@@ -144,11 +173,11 @@ function renderType(type, t) {
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
   const lines = [
-    t('流状态') + '：' + t('异常'),
-    (ss.end_reason || 'unknown'),
+    t('\u6d41\u72b6\u6001') + ' / ' + t('\u5f02\u5e38'),
+    ss.end_reason || 'unknown',
   ];
   if (ss.error_count > 0) {
-    lines.push(`${t('软错误')}: ${ss.error_count}`);
+    lines.push(`${t('\u8f6f\u9519')}: ${ss.error_count}`);
   }
   if (ss.end_error) {
     lines.push(ss.end_error);
@@ -169,7 +198,7 @@ function renderIsStream(bool, t, streamStatus) {
     return (
       <span style={{ position: 'relative', display: 'inline-block' }}>
         <Tag color='blue' shape='circle'>
-          {t('流')}
+          {t('\u6d41')}
         </Tag>
         {isError && (
           <Tooltip content={buildStreamStatusTooltip(streamStatus, t)}>
@@ -184,23 +213,14 @@ function renderIsStream(bool, t, streamStatus) {
                 userSelect: 'none',
               }}
             >
-              <CircleAlert
-                size={14}
-                strokeWidth={2.5}
-                color='currentColor'
-              />
+              <CircleAlert size={12} />
             </span>
           </Tooltip>
         )}
       </span>
     );
-  } else {
-    return (
-      <Tag color='purple' shape='circle'>
-        {t('非流')}
-      </Tag>
-    );
   }
+  return <Tag color='grey' shape='circle'>{t('\u975e\u6d41')}</Tag>;
 }
 
 function renderUseTime(type, t) {
@@ -261,7 +281,7 @@ function renderBillingTag(record, t) {
   if (other?.billing_source === 'subscription') {
     return (
       <Tag color='green' shape='circle'>
-        {t('订阅抵扣')}
+        {t('\u8ba2\u9605\u62b5\u6263')}
       </Tag>
     );
   }
@@ -277,7 +297,7 @@ function renderModelName(record, copyText, t) {
   if (!modelMapped) {
     return renderModelTag(record.model_name, {
       onClick: (event) => {
-        copyText(event, record.model_name).then((r) => {});
+        copyText(event, record.model_name).then(() => {});
       },
     });
   } else {
@@ -290,22 +310,22 @@ function renderModelName(record, copyText, t) {
                 <Space vertical align={'start'}>
                   <div className='flex items-center'>
                     <Typography.Text strong style={{ marginRight: 8 }}>
-                      {t('请求并计费模型')}:
+                      {t('\u8bf7\u6c42\u5e76\u8ba1\u8d39\u6a21\u578b')}:
                     </Typography.Text>
                     {renderModelTag(record.model_name, {
                       onClick: (event) => {
-                        copyText(event, record.model_name).then((r) => {});
+                        copyText(event, record.model_name).then(() => {});
                       },
                     })}
                   </div>
                   <div className='flex items-center'>
                     <Typography.Text strong style={{ marginRight: 8 }}>
-                      {t('实际模型')}:
+                      {t('\u5b9e\u9645\u6a21\u578b')}:
                     </Typography.Text>
                     {renderModelTag(other.upstream_model_name, {
                       onClick: (event) => {
                         copyText(event, other.upstream_model_name).then(
-                          (r) => {},
+                          () => {},
                         );
                       },
                     })}
@@ -316,7 +336,7 @@ function renderModelName(record, copyText, t) {
           >
             {renderModelTag(record.model_name, {
               onClick: (event) => {
-                copyText(event, record.model_name).then((r) => {});
+                copyText(event, record.model_name).then(() => {});
               },
               suffixIcon: (
                 <Route
@@ -349,15 +369,20 @@ function getPromptCacheSummary(other) {
   }
 
   const cacheReadTokens = toTokenNumber(other.cache_tokens);
+  const explicitCacheWriteTokens = toTokenNumber(other.cache_write_tokens);
   const cacheCreationTokens = toTokenNumber(other.cache_creation_tokens);
   const cacheCreationTokens5m = toTokenNumber(other.cache_creation_tokens_5m);
   const cacheCreationTokens1h = toTokenNumber(other.cache_creation_tokens_1h);
 
   const hasSplitCacheCreation =
     cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
-  const cacheWriteTokens = hasSplitCacheCreation
+  const fallbackCacheWriteTokens = hasSplitCacheCreation
     ? cacheCreationTokens5m + cacheCreationTokens1h
     : cacheCreationTokens;
+  const cacheWriteTokens =
+    explicitCacheWriteTokens > 0
+      ? explicitCacheWriteTokens
+      : fallbackCacheWriteTokens;
 
   if (cacheReadTokens <= 0 && cacheWriteTokens <= 0) {
     return null;
@@ -366,6 +391,38 @@ function getPromptCacheSummary(other) {
   return {
     cacheReadTokens,
     cacheWriteTokens,
+  };
+}
+
+function getInputTokenDisplay(record, other) {
+  const promptTokens = toTokenNumber(record?.prompt_tokens);
+  const cacheSummary = getPromptCacheSummary(other);
+  const cacheReadTokens = cacheSummary?.cacheReadTokens || 0;
+  const cacheWriteTokens = cacheSummary?.cacheWriteTokens || 0;
+  const explicitTotal = toTokenNumber(other?.input_tokens_total);
+
+  if (explicitTotal > 0) {
+    return {
+      promptText: formatTokenCount(explicitTotal),
+      cacheReadTokens,
+      cacheWriteTokens,
+    };
+  }
+
+  if (cacheReadTokens > 0 || cacheWriteTokens > 0) {
+    return {
+      promptText: formatTokenCount(
+        promptTokens + cacheReadTokens + cacheWriteTokens,
+      ),
+      cacheReadTokens,
+      cacheWriteTokens,
+    };
+  }
+
+  return {
+    promptText: formatTokenCount(promptTokens),
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
   };
 }
 
@@ -384,6 +441,327 @@ function getUsageLogGroupSummary(groupRatio, userGroupRatio, t) {
     return '';
   }
   return `${useUserGroupRatio ? t('专属倍率') : t('分组')} ${formatRatio(ratio)}x`;
+}
+
+function getEffectiveGroupRatioInfo(groupRatio, userGroupRatio, t) {
+  const parsedUserGroupRatio = Number(userGroupRatio);
+  const useUserGroupRatio =
+    Number.isFinite(parsedUserGroupRatio) && parsedUserGroupRatio !== -1;
+  const value = Number(useUserGroupRatio ? userGroupRatio : groupRatio);
+  return {
+    value: Number.isFinite(value) ? value : 1,
+    label: useUserGroupRatio ? t('专属倍率') : t('分组倍率'),
+  };
+}
+
+function getCacheWriteFormulaParts(other) {
+  const explicitCacheWriteTokens = toTokenNumber(other?.cache_write_tokens);
+  const cacheCreationTokens = toTokenNumber(other?.cache_creation_tokens);
+  const cacheCreationTokens5m = toTokenNumber(other?.cache_creation_tokens_5m);
+  const cacheCreationTokens1h = toTokenNumber(other?.cache_creation_tokens_1h);
+  const hasSplit = cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
+
+  if (hasSplit) {
+    return [
+      cacheCreationTokens5m > 0
+        ? {
+            label: '缓存写(5m)',
+            tokens: cacheCreationTokens5m,
+            ratio: Number(other?.cache_creation_ratio_5m || other?.cache_creation_ratio || 1),
+          }
+        : null,
+      cacheCreationTokens1h > 0
+        ? {
+            label: '缓存写(1h)',
+            tokens: cacheCreationTokens1h,
+            ratio: Number(other?.cache_creation_ratio_1h || other?.cache_creation_ratio || 1),
+          }
+        : null,
+      cacheCreationTokens > cacheCreationTokens5m + cacheCreationTokens1h
+        ? {
+            label: '缓存写',
+            tokens:
+              cacheCreationTokens - cacheCreationTokens5m - cacheCreationTokens1h,
+            ratio: Number(other?.cache_creation_ratio || 1),
+          }
+        : null,
+    ].filter(Boolean);
+  }
+
+  const fallbackTokens =
+    explicitCacheWriteTokens > 0 ? explicitCacheWriteTokens : cacheCreationTokens;
+  if (fallbackTokens <= 0) {
+    return [];
+  }
+
+  return [
+    {
+      label: '缓存写',
+      tokens: fallbackTokens,
+      ratio: Number(other?.cache_creation_ratio || 1),
+    },
+  ];
+}
+
+function getPrimaryCacheWriteRatio(other) {
+  const ratio5m = Number(other?.cache_creation_ratio_5m || 0);
+  if (Number.isFinite(ratio5m) && ratio5m > 0) {
+    return ratio5m;
+  }
+  const ratio1h = Number(other?.cache_creation_ratio_1h || 0);
+  if (Number.isFinite(ratio1h) && ratio1h > 0) {
+    return ratio1h;
+  }
+  const ratio = Number(other?.cache_creation_ratio || 0);
+  if (Number.isFinite(ratio) && ratio > 0) {
+    return ratio;
+  }
+  return 5;
+}
+
+function renderUsageLogFormulaContent(detailSummary, t) {
+  const formulaLines = Array.isArray(detailSummary?.formulaLines)
+    ? detailSummary.formulaLines
+    : [];
+  const notes = Array.isArray(detailSummary?.notes) ? detailSummary.notes : [];
+
+  if (!formulaLines.length && !notes.length) {
+    return null;
+  }
+
+  return (
+    <div
+      style={{
+        width: 460,
+        maxWidth: '80vw',
+        maxHeight: '60vh',
+        overflowY: 'auto',
+        lineHeight: 1.6,
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>{t('花费公式')}</div>
+      {formulaLines.map((line, index) => (
+        <div
+          key={`${line.label}-${index}`}
+          style={{
+            padding: '8px 0',
+            borderTop: index === 0 ? 'none' : '1px solid var(--semi-color-border)',
+          }}
+        >
+          <div style={{ fontWeight: 500 }}>{line.label}</div>
+          <div style={{ fontSize: 12, color: 'var(--semi-color-text-1)' }}>
+            {line.formula}
+          </div>
+          {line.amount ? (
+            <div style={{ fontSize: 12, color: 'var(--semi-color-text-2)', marginTop: 2 }}>
+              = {line.amount}
+            </div>
+          ) : null}
+        </div>
+      ))}
+      {notes.length ? (
+        <div
+          style={{
+            marginTop: 8,
+            paddingTop: 8,
+            borderTop: '1px solid var(--semi-color-border)',
+            fontSize: 12,
+            color: 'var(--semi-color-text-2)',
+          }}
+        >
+          {notes.map((note, index) => (
+            <div key={`${note}-${index}`}>{note}</div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function buildUsageLogDetailFormula(record, other, text, t) {
+  if (record.type === 6) {
+    return {
+      formulaLines: [
+        buildQuotaFormulaLine(
+          t('异步任务退款'),
+          t('本条日志为退款记录，表示返还此前已扣除的额度'),
+          renderQuota(record?.quota, 6),
+        ),
+      ],
+    };
+  }
+
+  if (
+    other?.violation_fee === true ||
+    Boolean(other?.violation_fee_code) ||
+    Boolean(other?.violation_fee_marker)
+  ) {
+    const feeQuota = Number(other?.fee_quota ?? record?.quota ?? 0);
+    const groupInfo = getEffectiveGroupRatioInfo(
+      other?.group_ratio,
+      other?.user_group_ratio,
+      t,
+    );
+    return {
+      formulaLines: [
+        buildQuotaFormulaLine(
+          t('违规扣费'),
+          `${t('固定扣费')} ${renderQuota(feeQuota, 6)}${
+            groupInfo ? `，${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x` : ''
+          }`,
+          renderQuota(record?.quota, 6),
+        ),
+      ],
+      notes: text ? [`${t('详情')}: ${text}`] : [],
+    };
+  }
+
+  if (record.type !== 2) {
+    return null;
+  }
+
+  const promptTokens = toTokenNumber(record?.prompt_tokens);
+  const completionTokens = toTokenNumber(record?.completion_tokens);
+  const modelRatio = Number(other?.model_ratio || 0);
+  const completionRatio = Number(other?.completion_ratio || 1);
+  const cacheReadTokens = toTokenNumber(other?.cache_tokens);
+  const cacheRatio = Number(other?.cache_ratio || 1);
+  const primaryCacheWriteRatio = getPrimaryCacheWriteRatio(other);
+  const groupInfo = getEffectiveGroupRatioInfo(
+    other?.group_ratio,
+    other?.user_group_ratio,
+    t,
+  );
+  const quotaPerUnit = getQuotaPerUnitValue();
+  const formulaLines = [];
+  const notes = [t('说明：以下为根据日志字段还原的可读公式，最终以实际扣费为准。')];
+
+  if (Number(other?.model_price) > -1) {
+    const modelPrice = Number(other?.model_price || 0);
+    const fixedQuota = modelPrice * quotaPerUnit * groupInfo.value;
+    formulaLines.push(
+      buildQuotaFormulaLine(
+        t('按次模型费用'),
+        `${t('模型单价')} ${renderQuota(modelPrice * quotaPerUnit, 6)} × ${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x`,
+        renderQuota(fixedQuota, 6),
+      ),
+    );
+  } else {
+    if (promptTokens > 0) {
+      const cacheWriteQuota =
+        promptTokens * modelRatio * primaryCacheWriteRatio * groupInfo.value;
+      formulaLines.push(
+        buildQuotaFormulaLine(
+          t('缓存写'),
+          `${promptTokens} tokens × ${t('模型倍率')} ${formatFormulaNumber(modelRatio)} × ${t('缓存写倍率')} ${formatFormulaNumber(primaryCacheWriteRatio)} × ${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x`,
+          renderQuota(cacheWriteQuota, 6),
+        ),
+      );
+    }
+
+    if (cacheReadTokens > 0) {
+      const cacheReadQuota =
+        cacheReadTokens * modelRatio * cacheRatio * groupInfo.value;
+      formulaLines.push(
+        buildQuotaFormulaLine(
+          t('缓存读'),
+          `${cacheReadTokens} tokens × ${t('模型倍率')} ${formatFormulaNumber(modelRatio)} × ${t('缓存读倍率')} ${formatFormulaNumber(cacheRatio)} × ${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x`,
+          renderQuota(cacheReadQuota, 6),
+        ),
+      );
+    }
+
+    if (promptTokens <= 0) {
+      const cacheWriteParts = getCacheWriteFormulaParts(other);
+      cacheWriteParts.forEach((part) => {
+        const cacheWriteQuota =
+          part.tokens * modelRatio * Number(part.ratio || 1) * groupInfo.value;
+        formulaLines.push(
+          buildQuotaFormulaLine(
+            t(part.label),
+            `${part.tokens} tokens × ${t('模型倍率')} ${formatFormulaNumber(modelRatio)} × ${t('缓存写倍率')} ${formatFormulaNumber(part.ratio)} × ${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x`,
+            renderQuota(cacheWriteQuota, 6),
+          ),
+        );
+      });
+    }
+
+    if (completionTokens > 0) {
+      const completionQuota =
+        completionTokens * modelRatio * completionRatio * groupInfo.value;
+      formulaLines.push(
+        buildQuotaFormulaLine(
+          t('输出'),
+          `${completionTokens} tokens × ${t('模型倍率')} ${formatFormulaNumber(modelRatio)} × ${t('输出倍率')} ${formatFormulaNumber(completionRatio)} × ${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x`,
+          renderQuota(completionQuota, 6),
+        ),
+      );
+    }
+  }
+
+  const webSearchCallCount = toTokenNumber(other?.web_search_call_count);
+  const webSearchPrice = Number(other?.web_search_price || 0);
+  if (webSearchCallCount > 0 && webSearchPrice > 0) {
+    const webSearchQuota =
+      (webSearchPrice * webSearchCallCount * quotaPerUnit * groupInfo.value) /
+      1000;
+    formulaLines.push(
+      buildQuotaFormulaLine(
+        t('Web 搜索'),
+        `${webSearchCallCount} ${t('次')} × ${renderQuota(webSearchPrice * quotaPerUnit, 6)} / 1000 × ${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x`,
+        renderQuota(webSearchQuota, 6),
+      ),
+    );
+  }
+
+  const fileSearchCallCount = toTokenNumber(other?.file_search_call_count);
+  const fileSearchPrice = Number(other?.file_search_price || 0);
+  if (fileSearchCallCount > 0 && fileSearchPrice > 0) {
+    const fileSearchQuota =
+      (fileSearchPrice * fileSearchCallCount * quotaPerUnit * groupInfo.value) /
+      1000;
+    formulaLines.push(
+      buildQuotaFormulaLine(
+        t('File 搜索'),
+        `${fileSearchCallCount} ${t('次')} × ${renderQuota(fileSearchPrice * quotaPerUnit, 6)} / 1000 × ${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x`,
+        renderQuota(fileSearchQuota, 6),
+      ),
+    );
+  }
+
+  if (other?.image_generation_call && Number(other?.image_generation_call_price) > 0) {
+    const imageGenerationPrice = Number(other?.image_generation_call_price || 0);
+    const imageGenerationQuota =
+      imageGenerationPrice * quotaPerUnit * groupInfo.value;
+    formulaLines.push(
+      buildQuotaFormulaLine(
+        t('绘图调用'),
+        `${renderQuota(imageGenerationPrice * quotaPerUnit, 6)} × ${groupInfo.label} ${formatFormulaNumber(groupInfo.value)}x`,
+        renderQuota(imageGenerationQuota, 6),
+      ),
+    );
+  }
+
+  if (Number(other?.audio_input_price) > 0) {
+    notes.push(
+      `${t('提示')}: ${t('该请求包含音频输入计费，音频部分已计入最终花费。')}`,
+    );
+  }
+
+  notes.push(t('当前公式口径：缓存写 + 缓存读 + 输出 + 附加项。'));
+
+  formulaLines.push(
+    buildQuotaFormulaLine(
+      t('最终花费'),
+      t('以上各项合计'),
+      renderQuota(record?.quota, 6),
+    ),
+  );
+
+  return {
+    formulaLines,
+    notes,
+  };
 }
 
 function renderCompactDetailSummary(summarySegments) {
@@ -425,10 +803,12 @@ function renderCompactDetailSummary(summarySegments) {
 
 function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
   const other = getLogOther(record.other);
+  const formula = buildUsageLogDetailFormula(record, other, text, t);
 
   if (record.type === 6) {
     return {
-      segments: [{ text: t('异步任务退款'), tone: 'primary' }],
+      segments: [{ text: t('\u5f02\u6b65\u4efb\u52a1\u9000\u8d39'), tone: 'primary' }],
+      formula,
     };
   }
 
@@ -450,13 +830,14 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     return {
       segments: [
         groupText ? { text: groupText, tone: 'primary' } : null,
-        { text: t('违规扣费'), tone: 'primary' },
+        { text: t('\u8fdd\u89c4\u6263\u8d39'), tone: 'primary' },
         {
-          text: `${t('扣费')}：${renderQuota(feeQuota, 6)}`,
+          text: `${t('\u6263\u8d39')}: ${renderQuota(feeQuota, 6)}`,
           tone: 'secondary',
         },
-        text ? { text: `${t('详情')}：${text}`, tone: 'secondary' } : null,
+        text ? { text: `${t('\u8be6\u60c5')}: ${text}`, tone: 'secondary' } : null,
       ].filter(Boolean),
+      formula,
     };
   }
 
@@ -489,12 +870,12 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
           other?.user_group_ratio,
           other.cache_tokens || 0,
           other.cache_ratio || 1.0,
-          0,
-          1.0,
-          0,
-          1.0,
-          0,
-          1.0,
+          other.cache_creation_tokens || 0,
+          other.cache_creation_ratio || 1.0,
+          other.cache_creation_tokens_5m || 0,
+          other.cache_creation_ratio_5m || other.cache_creation_ratio || 1.0,
+          other.cache_creation_tokens_1h || 0,
+          other.cache_creation_ratio_1h || other.cache_creation_ratio || 1.0,
           false,
           1.0,
           other?.is_system_prompt_overwritten,
@@ -502,9 +883,9 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
           billingDisplayMode,
           'segments',
         ),
+    formula,
   };
 }
-
 export const getLogsColumns = ({
   t,
   COLUMN_KEYS,
@@ -527,7 +908,7 @@ export const getLogsColumns = ({
       render: (text, record, index) => {
         let isMultiKey = false;
         let multiKeyIndex = -1;
-        let content = t('渠道') + `：${record.channel}`;
+        let content = t('\u6e20\u9053') + ': ' + record.channel;
         let affinity = null;
         let showMarker = false;
         let other = getLogOther(record.other);
@@ -541,7 +922,7 @@ export const getLogsColumns = ({
             Array.isArray(adminInfo.use_channel) &&
             adminInfo.use_channel.length > 0
           ) {
-            content = t('渠道') + `：${adminInfo.use_channel.join('->')}`;
+            content = t('\u6e20\u9053') + ': ' + adminInfo.use_channel.join('->');
           }
           if (adminInfo.channel_affinity) {
             affinity = adminInfo.channel_affinity;
@@ -763,7 +1144,7 @@ export const getLogsColumns = ({
           {t('输入')}
           <Tooltip
             content={t(
-              '根据 Anthropic 协定，/v1/messages 的输入 tokens 仅统计非缓存输入，不包含缓存读取与缓存写入 tokens。',
+              '\u6839\u636e Anthropic \u534f\u5b9a v1/messages \u7684\u8f93\u5165 tokens \u4ec5\u7edf\u8ba1\u975e\u7f13\u5b58\u8f93\u5165\uff0c\u4e0d\u5305\u542b\u7f13\u5b58\u8bfb\u53d6\u4e0e\u7f13\u5b58\u5199\u5165 tokens',
             )}
           >
             <IconHelpCircle className='text-gray-400 cursor-help' />
@@ -773,17 +1154,17 @@ export const getLogsColumns = ({
       dataIndex: 'prompt_tokens',
       render: (text, record, index) => {
         const other = getLogOther(record.other);
-        const cacheSummary = getPromptCacheSummary(other);
-        const hasCacheRead = (cacheSummary?.cacheReadTokens || 0) > 0;
-        const hasCacheWrite = (cacheSummary?.cacheWriteTokens || 0) > 0;
-        let cacheText = '';
-        if (hasCacheRead && hasCacheWrite) {
-          cacheText = `${t('缓存读')} ${formatTokenCount(cacheSummary.cacheReadTokens)} · ${t('写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
-        } else if (hasCacheRead) {
-          cacheText = `${t('缓存读')} ${formatTokenCount(cacheSummary.cacheReadTokens)}`;
-        } else if (hasCacheWrite) {
-          cacheText = `${t('缓存写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
+        const { promptText, cacheReadTokens, cacheWriteTokens } =
+          getInputTokenDisplay(record, other);
+
+        const cacheParts = [];
+        if (cacheReadTokens > 0) {
+          cacheParts.push(`${t('\u7f13\u5b58\u8bfb')} ${formatTokenCount(cacheReadTokens)}`);
         }
+        if (cacheWriteTokens > 0) {
+          cacheParts.push(`${t('\u7f13\u5b58\u5199')} ${formatTokenCount(cacheWriteTokens)}`);
+        }
+        const cacheText = cacheParts.join('\uff0c');
 
         return record.type === 0 ||
           record.type === 2 ||
@@ -797,7 +1178,7 @@ export const getLogsColumns = ({
               lineHeight: 1.2,
             }}
           >
-            <span>{text}</span>
+            <span>{promptText}</span>
             {cacheText ? (
               <span
                 style={{
@@ -852,7 +1233,7 @@ export const getLogsColumns = ({
         if (isSubscription) {
           // Subscription billed: show only tag (no $0), but keep tooltip for equivalent cost.
           return (
-            <Tooltip content={`${t('由订阅抵扣')}：${renderQuota(text, 6)}`}>
+            <Tooltip content={`${t('\u7531\u8ba2\u9605\u62b5\u6263')}: ${renderQuota(text, 6)}`}>
               <span>{renderBillingTag(record, t)}</span>
             </Tooltip>
           );
@@ -867,7 +1248,7 @@ export const getLogsColumns = ({
           {t('IP')}
           <Tooltip
             content={t(
-              '只有当用户设置开启IP记录时，才会进行请求和错误类型日志的IP记录',
+              '只有当用户设置开启 IP 记录时，才会进行请求和错误类型日志的 IP 记录',
             )}
           >
             <IconHelpCircle className='text-gray-400 cursor-help' />
@@ -902,15 +1283,15 @@ export const getLogsColumns = ({
     },
     {
       key: COLUMN_KEYS.RETRY,
-      title: t('重试'),
+      title: t('\u91cd\u8bd5'),
       dataIndex: 'retry',
       render: (text, record, index) => {
         if (!(record.type === 2 || record.type === 5)) {
           return <></>;
         }
-        let content = t('渠道') + `：${record.channel}`;
+        let content = t('\u6e20\u9053') + ': ' + record.channel;
         if (record.other !== '') {
-          let other = JSON.parse(record.other);
+          let other = getLogOther(record.other);
           if (other === null) {
             return <></>;
           }
@@ -922,7 +1303,7 @@ export const getLogsColumns = ({
             ) {
               let useChannel = other.admin_info.use_channel;
               let useChannelStr = useChannel.join('->');
-              content = t('渠道') + `：${useChannelStr}`;
+                content = t('\u6e20\u9053') + ': ' + useChannelStr;
             }
           }
         }
@@ -960,8 +1341,36 @@ export const getLogsColumns = ({
           );
         }
 
-        return renderCompactDetailSummary(detailSummary.segments);
+        const compactSummary = renderCompactDetailSummary(detailSummary.segments);
+        const formulaContent = renderUsageLogFormulaContent(detailSummary.formula, t);
+
+        if (!formulaContent) {
+          return compactSummary;
+        }
+
+        return (
+          <Popover
+            trigger='click'
+            position='leftTop'
+            showArrow={true}
+            content={formulaContent}
+            style={{ maxWidth: '80vw' }}
+          >
+            <div style={{ cursor: 'pointer' }}>
+              {compactSummary}
+              <Typography.Text
+                type='tertiary'
+                size='small'
+                style={{ display: 'block', marginTop: 2, fontSize: 11 }}
+              >
+                {t('点击查看公式')}
+              </Typography.Text>
+            </div>
+          </Popover>
+        );
       },
     },
   ];
 };
+
+

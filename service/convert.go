@@ -31,6 +31,12 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	if claudeRequest.Stream != nil {
 		openAIRequest.Stream = lo.ToPtr(lo.FromPtr(claudeRequest.Stream))
 	}
+	if claudeRequest.ToolChoice != nil {
+		openAIRequest.ToolChoice = convertClaudeToolChoiceToOpenAI(claudeRequest.ToolChoice)
+		if claudeToolChoiceDisablesParallelUse(claudeRequest.ToolChoice) {
+			openAIRequest.ParallelTooCalls = common.GetPointer(false)
+		}
+	}
 
 	isOpenRouter := info.ChannelType == constant.ChannelTypeOpenRouter
 
@@ -216,11 +222,108 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	return &openAIRequest, nil
 }
 
+func convertClaudeToolChoiceToOpenAI(toolChoice any) any {
+	switch choice := toolChoice.(type) {
+	case nil:
+		return nil
+	case string:
+		return choice
+	case dto.ClaudeToolChoice:
+		return convertClaudeToolChoiceFields(choice.Type, choice.Name, toolChoice)
+	case map[string]any:
+		return convertClaudeToolChoiceMap(choice)
+	case json.RawMessage:
+		var choiceMap map[string]any
+		if err := common.Unmarshal(choice, &choiceMap); err == nil {
+			return convertClaudeToolChoiceMap(choiceMap)
+		}
+		return toolChoice
+	default:
+		var choiceMap map[string]any
+		choiceBytes, err := common.Marshal(toolChoice)
+		if err != nil {
+			return toolChoice
+		}
+		if err := common.Unmarshal(choiceBytes, &choiceMap); err != nil {
+			return toolChoice
+		}
+		return convertClaudeToolChoiceMap(choiceMap)
+	}
+}
+
+func convertClaudeToolChoiceMap(choiceMap map[string]any) any {
+	choiceType, _ := choiceMap["type"].(string)
+	name, _ := choiceMap["name"].(string)
+	return convertClaudeToolChoiceFields(choiceType, name, choiceMap)
+}
+
+func convertClaudeToolChoiceFields(choiceType string, name string, fallback any) any {
+	switch choiceType {
+	case "auto", "none":
+		return choiceType
+	case "any":
+		return "required"
+	case "tool":
+		if name == "" {
+			return "required"
+		}
+		return map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": name,
+			},
+		}
+	default:
+		return fallback
+	}
+}
+
+func claudeToolChoiceDisablesParallelUse(toolChoice any) bool {
+	switch choice := toolChoice.(type) {
+	case dto.ClaudeToolChoice:
+		return choice.DisableParallelToolUse
+	case map[string]any:
+		disabled, _ := choice["disable_parallel_tool_use"].(bool)
+		return disabled
+	case json.RawMessage:
+		var choiceMap map[string]any
+		return common.Unmarshal(choice, &choiceMap) == nil && claudeToolChoiceDisablesParallelUse(choiceMap)
+	default:
+		var choiceMap map[string]any
+		choiceBytes, err := common.Marshal(toolChoice)
+		if err != nil {
+			return false
+		}
+		return common.Unmarshal(choiceBytes, &choiceMap) == nil && claudeToolChoiceDisablesParallelUse(choiceMap)
+	}
+}
+
 func generateStopBlock(index int) *dto.ClaudeResponse {
 	return &dto.ClaudeResponse{
 		Type:  "content_block_stop",
 		Index: common.GetPointer[int](index),
 	}
+}
+
+func normalizeClaudeToolUseID(id string) string {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return "toolu_" + common.GetUUID()
+	}
+	var builder strings.Builder
+	builder.Grow(len(trimmed))
+	for _, r := range trimmed {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			builder.WriteRune(r)
+		} else {
+			builder.WriteByte('_')
+		}
+	}
+	normalized := builder.String()
+	if normalized == "" {
+		return "toolu_" + common.GetUUID()
+	}
+	return normalized
 }
 
 func buildClaudeUsageFromOpenAIUsage(oaiUsage *dto.Usage) *dto.ClaudeUsage {
@@ -333,7 +436,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 			resp := &dto.ClaudeResponse{
 				Type: "content_block_start",
 				ContentBlock: &dto.ClaudeMediaMessage{
-					Id:    toolCall.ID,
+					Id:    normalizeClaudeToolUseID(toolCall.ID),
 					Type:  "tool_use",
 					Name:  toolCall.Function.Name,
 					Input: map[string]interface{}{},
@@ -463,6 +566,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 	} else {
 		chosenChoice := openAIResponse.Choices[0]
 		doneChunk := chosenChoice.FinishReason != nil && *chosenChoice.FinishReason != ""
+		deferDoneUntilUsage := false
 		if doneChunk {
 			info.FinishReason = *chosenChoice.FinishReason
 			oaiUsage := openAIResponse.Usage
@@ -470,7 +574,9 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 				oaiUsage = info.ClaudeConvertInfo.Usage
 				// Some upstreams emit finish_reason first, then send a final usage-only chunk.
 				// Defer closing until usage is available so the final message_delta carries it.
-				return claudeResponses
+				if oaiUsage == nil {
+					deferDoneUntilUsage = true
+				}
 			}
 		}
 
@@ -506,7 +612,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 						Index: &idx,
 						Type:  "content_block_start",
 						ContentBlock: &dto.ClaudeMediaMessage{
-							Id:    toolCall.ID,
+							Id:    normalizeClaudeToolUseID(toolCall.ID),
 							Type:  "tool_use",
 							Name:  toolCall.Function.Name,
 							Input: map[string]interface{}{},
@@ -579,6 +685,9 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 		}
 
 		if doneChunk || info.ClaudeConvertInfo.Done {
+			if deferDoneUntilUsage {
+				return claudeResponses
+			}
 			stopOpenBlocks()
 			oaiUsage := openAIResponse.Usage
 			if oaiUsage == nil {
@@ -619,7 +728,7 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 			for _, toolUse := range choice.Message.ParseToolCalls() {
 				claudeContent := dto.ClaudeMediaMessage{}
 				claudeContent.Type = "tool_use"
-				claudeContent.Id = toolUse.ID
+				claudeContent.Id = normalizeClaudeToolUseID(toolUse.ID)
 				claudeContent.Name = toolUse.Function.Name
 				var mapParams map[string]interface{}
 				if err := common.Unmarshal([]byte(toolUse.Function.Arguments), &mapParams); err == nil {

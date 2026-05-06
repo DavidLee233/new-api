@@ -1,11 +1,12 @@
 package helper
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	appcommon "github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -25,41 +26,41 @@ func ModelMappedHelper(c *gin.Context, info *common.RelayInfo, request dto.Reque
 		mappingModelName = strings.TrimSuffix(originModelName, ratio_setting.CompactModelSuffix)
 	}
 
-	// map model name
+	modelMap := make(map[string]string)
 	modelMapping := c.GetString("model_mapping")
 	if modelMapping != "" && modelMapping != "{}" {
-		modelMap := make(map[string]string)
-		err := json.Unmarshal([]byte(modelMapping), &modelMap)
-		if err != nil {
+		if err := appcommon.Unmarshal([]byte(modelMapping), &modelMap); err != nil {
 			return fmt.Errorf("unmarshal_model_mapping_failed")
 		}
+	}
+	if info.ChannelType == constant.ChannelTypeAntigravity {
+		modelMap = constant.MergeAntigravityModelMapping(modelMap)
+	}
 
-		// 支持链式模型重定向，最终使用链尾的模型
+	if len(modelMap) > 0 {
 		currentModel := mappingModelName
 		visitedModels := map[string]bool{
 			currentModel: true,
 		}
 		for {
-			if mappedModel, exists := modelMap[currentModel]; exists && mappedModel != "" {
-				// 模型重定向循环检测，避免无限循环
-				if visitedModels[mappedModel] {
-					if mappedModel == currentModel {
-						if currentModel == info.OriginModelName {
-							info.IsModelMapped = false
-							return nil
-						} else {
-							info.IsModelMapped = true
-							break
-						}
-					}
-					return errors.New("model_mapping_contains_cycle")
-				}
-				visitedModels[mappedModel] = true
-				currentModel = mappedModel
-				info.IsModelMapped = true
-			} else {
+			mappedModel, exists := modelMap[currentModel]
+			if !exists || mappedModel == "" {
 				break
 			}
+			if visitedModels[mappedModel] {
+				if mappedModel == currentModel {
+					if currentModel == info.OriginModelName {
+						info.IsModelMapped = false
+						return nil
+					}
+					info.IsModelMapped = true
+					break
+				}
+				return errors.New("model_mapping_contains_cycle")
+			}
+			visitedModels[mappedModel] = true
+			currentModel = mappedModel
+			info.IsModelMapped = true
 		}
 		if info.IsModelMapped {
 			info.UpstreamModelName = currentModel
